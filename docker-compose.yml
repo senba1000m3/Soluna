@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  backend:
+    build: ./Lunaris
+    container_name: lunaris_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./Lunaris:/app
+    environment:
+      - ANILIST_API_URL=https://graphql.anilist.co
+    restart: always
+
+  frontend:
+    build: ./Solaris
+    container_name: solaris_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: always
