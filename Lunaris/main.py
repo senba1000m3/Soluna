@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -10,6 +11,7 @@ from sqlmodel import Session
 from anilist_client import AniListClient
 from database import get_session, init_db
 from models import User
+from recommendation_engine import RecommendationEngine
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -48,13 +50,49 @@ app.add_middleware(
 # Note: In a production async app, you might want to manage the httpx client session lifecycle more carefully,
 # but the current implementation in AniListClient creates a new client per request which is safe but less efficient.
 anilist_client = AniListClient()
+rec_engine = RecommendationEngine()
+
+# --- Helper Functions ---
+
+
+def get_next_season_info():
+    """
+    Determines the next anime season based on the current date.
+    """
+    now = datetime.now()
+    month = now.month
+    year = now.year
+
+    # Winter: 1-3, Spring: 4-6, Summer: 7-9, Fall: 10-12
+    if 1 <= month <= 3:
+        return "SPRING", year
+    elif 4 <= month <= 6:
+        return "SUMMER", year
+    elif 7 <= month <= 9:
+        return "FALL", year
+    else:
+        return "WINTER", year + 1
+
+
+def format_season_display(season: str) -> str:
+    """
+    Formats the season string as requested: 'Season-Month'.
+    """
+    mapping = {
+        "WINTER": "冬-1 月",
+        "SPRING": "春-4 月",
+        "SUMMER": "夏-7 月",
+        "FALL": "秋-10 月",
+    }
+    return mapping.get(season, season)
+
 
 # --- Pydantic Models ---
 
 
 class RecommendRequest(BaseModel):
-    season: str = "WINTER"
-    year: int = 2024
+    season: Optional[str] = None
+    year: Optional[int] = None
     username: Optional[str] = None  # Optional: for personalized filtering
 
 
@@ -129,14 +167,47 @@ async def search_anime(request: SearchRequest):
 async def recommend_anime(request: RecommendRequest):
     """
     Get seasonal recommendations.
-    Currently fetches popular anime for the specified season and year from AniList.
+    If username is provided, sorts by compatibility score.
+    Defaults to the next season if season/year are not provided.
     """
     try:
-        logger.info(f"Fetching recommendations for {request.season} {request.year}")
-        anime_list = await anilist_client.get_seasonal_anime(
-            season=request.season, year=request.year
+        # Determine target season
+        if not request.season or not request.year:
+            target_season, target_year = get_next_season_info()
+        else:
+            target_season = request.season.upper()
+            target_year = request.year
+
+        display_season = format_season_display(target_season)
+        logger.info(
+            f"Fetching recommendations for {target_season} {target_year} ({display_season})"
         )
-        return {"recommendations": anime_list}
+
+        # 1. Fetch Seasonal Anime
+        anime_list = await anilist_client.get_seasonal_anime(
+            season=target_season, year=target_year
+        )
+
+        # 2. If username provided, calculate personalized scores
+        user_profile = {}
+        if request.username:
+            logger.info(f"Building profile for user: {request.username}")
+            user_list = await anilist_client.get_user_anime_list(request.username)
+            if user_list:
+                user_profile = rec_engine.build_user_profile(user_list)
+                anime_list = rec_engine.recommend_seasonal(user_profile, anime_list)
+            else:
+                logger.warning(
+                    f"No list found for {request.username}, returning raw popularity list."
+                )
+
+        return {
+            "season": target_season,
+            "year": target_year,
+            "display_season": display_season,
+            "recommendations": anime_list,
+        }
+
     except Exception as e:
         logger.error(f"Error in recommend endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
