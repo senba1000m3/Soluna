@@ -3,10 +3,16 @@ __pycache__/
 *.py[cod]
 *$py.class
 venv/
+.venv/
 .env
 .pytest_cache/
 Lunaris/venv/
+Lunaris/.venv/
 Lunaris/.env
+Lunaris/uv.lock
+
+# uv
+.uv/
 
 # Node.js / Frontend
 node_modules/

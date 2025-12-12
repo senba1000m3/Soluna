@@ -1,14 +1,15 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlmodel import Session
+
 # Import the client we created
 from anilist_client import AniListClient
 from database import get_session, init_db
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from models import User
-from pydantic import BaseModel
-from sqlmodel import Session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
