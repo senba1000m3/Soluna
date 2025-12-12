@@ -3,17 +3,20 @@ FROM node:23-alpine as build
 
 WORKDIR /app
 
-# Copy package files first to leverage Docker cache
-COPY package*.json ./
+# Enable pnpm
+RUN corepack enable
+
+# Copy package files (Include pnpm-lock.yaml!)
+COPY package.json pnpm-lock.yaml ./
 
 # Install dependencies
-RUN npm install
+RUN pnpm install --frozen-lockfile
 
 # Copy the rest of the application code
 COPY . .
 
 # Build the application (Vite outputs to /dist by default)
-RUN npm run build
+RUN pnpm run build
 
 # Stage 2: Serve the application with Nginx
 FROM nginx:alpine
