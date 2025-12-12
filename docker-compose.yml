@@ -10,6 +10,7 @@ services:
       - ./Lunaris:/app
     environment:
       - ANILIST_API_URL=https://graphql.anilist.co
+      - DATABASE_URL=sqlite:///./soluna.db
     restart: always
 
   frontend:

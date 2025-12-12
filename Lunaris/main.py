@@ -3,9 +3,12 @@ from typing import Any, Dict, List, Optional
 
 # Import the client we created
 from anilist_client import AniListClient
-from fastapi import FastAPI, HTTPException
+from database import get_session, init_db
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from models import User
 from pydantic import BaseModel
+from sqlmodel import Session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +19,12 @@ app = FastAPI(
     description="Backend for Ani-Risk Project (AniList Analytics)",
     version="0.1.0",
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
 
 # Configure CORS to allow requests from the frontend
 origins = [
@@ -52,6 +61,11 @@ class SearchRequest(BaseModel):
     query: str
 
 
+class CreateUserRequest(BaseModel):
+    username: str
+    anilist_id: Optional[int] = None
+
+
 class DropPredictRequest(BaseModel):
     username: str
     anime_id: int
@@ -78,6 +92,22 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.post("/users", response_model=User)
+def create_user(user: CreateUserRequest, session: Session = Depends(get_session)):
+    """
+    Create a new user in the database.
+    """
+    try:
+        db_user = User(username=user.username, anilist_id=user.anilist_id)
+        session.add(db_user)
+        session.commit()
+        session.refresh(db_user)
+        return db_user
+    except Exception as e:
+        logger.error(f"Error creating user: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/search")
