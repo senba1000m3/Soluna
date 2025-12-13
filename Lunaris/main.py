@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -116,8 +117,12 @@ class PairCompareRequest(BaseModel):
 
 
 class TimelineRequest(BaseModel):
-    username: str
+    username: Optional[str] = None
     birth_year: int
+
+
+class UserInfoRequest(BaseModel):
+    username: str
 
 
 # --- Endpoints ---
@@ -288,19 +293,106 @@ async def compare_users(request: PairCompareRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/user_info")
+async def get_user_info(request: UserInfoRequest):
+    """
+    Get basic user info including birth date if available.
+    """
+    try:
+        profile = await anilist_client.get_user_profile(request.username)
+        if not profile:
+            raise HTTPException(status_code=404, detail="User not found")
+        return profile
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error fetching user info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/timeline")
 async def generate_timeline(request: TimelineRequest):
     """
     Generate a generational timeline of anime based on user's birth year.
-    (Placeholder)
     """
-    logger.info(
-        f"Generating timeline for {request.username}, born {request.birth_year}"
-    )
+    try:
+        logger.info(
+            f"Generating timeline for {request.username}, born {request.birth_year}"
+        )
 
-    return {
-        "username": request.username,
-        "birth_year": request.birth_year,
-        "timeline_data": [],
-        "message": "Timeline generation logic to be implemented",
-    }
+        # 1. Prepare Years to Fetch
+        current_year = datetime.now().year
+        chronological_years = list(range(request.birth_year, current_year + 1))
+        milestones = rec_engine.get_timeline_milestones(request.birth_year)
+
+        # Union of all years needed
+        milestone_years = [m["year"] for m in milestones]
+        all_years = sorted(list(set(chronological_years + milestone_years)))
+
+        # 2. Fetch User List (if username provided)
+        user_list = []
+        if request.username:
+            user_list = await anilist_client.get_user_anime_list(request.username)
+
+        # 3. Fetch popular anime for ALL years in parallel (with rate limiting)
+        # AniList has a rate limit. We use a semaphore to limit concurrent requests.
+        semaphore = asyncio.Semaphore(2)
+
+        async def fetch_with_semaphore(year):
+            for attempt in range(3):
+                async with semaphore:
+                    # Add a small delay to be safe
+                    await asyncio.sleep(0.6)
+                    res = await anilist_client.get_top_anime_by_year(year, per_page=5)
+                    if res:
+                        return res
+                    # If failed (empty list), wait before retrying
+                    await asyncio.sleep(1.0 * (attempt + 1))
+            return []
+
+        tasks = []
+        for year in all_years:
+            tasks.append(fetch_with_semaphore(year))
+
+        results = await asyncio.gather(*tasks)
+        year_anime_map = {year: res for year, res in zip(all_years, results)}
+
+        # 4. Build Chronological Data (Every year)
+        chronological_data = []
+        for year in chronological_years:
+            popular_anime = year_anime_map.get(year, [])
+            representative = rec_engine.select_representative_anime(
+                year, user_list, popular_anime
+            )
+            if representative:
+                chronological_data.append(
+                    {
+                        "year": year,
+                        "age": year - request.birth_year,
+                        "anime": representative,
+                    }
+                )
+
+        # 5. Build Milestones Data (Specific ages)
+        timeline_data = []
+        for m in milestones:
+            year = m["year"]
+            popular_anime = year_anime_map.get(year, [])
+            # Use get_milestone_content to get top 5 with watched status
+            milestone_content = rec_engine.get_milestone_content(
+                year, user_list, popular_anime
+            )
+            if milestone_content:
+                m["anime"] = milestone_content
+                timeline_data.append(m)
+
+        return {
+            "username": request.username,
+            "birth_year": request.birth_year,
+            "chronological_data": chronological_data,
+            "timeline_data": timeline_data,
+        }
+
+    except Exception as e:
+        logger.error(f"Error generating timeline: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -4,6 +4,7 @@ import { Navbar } from "./components/Navbar";
 import { Soluna } from "./pages/Soluna";
 import { Recommend } from "./pages/Recommend";
 import { Synergy } from "./pages/Synergy";
+import { Timeline } from "./pages/Timeline";
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
             <Route path="/" element={<Soluna />} />
             <Route path="/recommend" element={<Recommend />} />
             <Route path="/synergy" element={<Synergy />} />
+            <Route path="/timeline" element={<Timeline />} />
           </Routes>
         </main>
       </div>

@@ -1,14 +1,14 @@
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Search, Sparkles, Users } from 'lucide-react';
+import React from "react";
+import { Link, useLocation } from "react-router-dom";
+import { Search, Sparkles, Users, Clock } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
 
   const isActive = (path: string) => {
     return location.pathname === path
-      ? 'bg-purple-600 text-white'
-      : 'text-gray-300 hover:bg-gray-800 hover:text-white';
+      ? "bg-purple-600 text-white"
+      : "text-gray-300 hover:bg-gray-800 hover:text-white";
   };
 
   return (
@@ -29,7 +29,7 @@ export const Navbar = () => {
           <div className="flex space-x-2">
             <Link
               to="/"
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${isActive('/')}`}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${isActive("/")}`}
             >
               <Search className="w-4 h-4" />
               搜尋
@@ -37,7 +37,7 @@ export const Navbar = () => {
 
             <Link
               to="/recommend"
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${isActive('/recommend')}`}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${isActive("/recommend")}`}
             >
               <Sparkles className="w-4 h-4" />
               新番預測
@@ -45,10 +45,18 @@ export const Navbar = () => {
 
             <Link
               to="/synergy"
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${isActive('/synergy')}`}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${isActive("/synergy")}`}
             >
               <Users className="w-4 h-4" />
               共鳴配對
+            </Link>
+
+            <Link
+              to="/timeline"
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${isActive("/timeline")}`}
+            >
+              <Clock className="w-4 h-4" />
+              動畫大世紀
             </Link>
           </div>
         </div>

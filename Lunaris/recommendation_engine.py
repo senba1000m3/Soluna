@@ -1,5 +1,6 @@
 import logging
 from collections import Counter, defaultdict
+from datetime import datetime
 from typing import Any, Dict, List
 
 import numpy as np
@@ -266,3 +267,139 @@ class RecommendationEngine:
             "score": max(0.0, score),  # Ensure non-negative
             "common_genres": common_genres[:5],
         }
+
+    def select_representative_anime(
+        self,
+        year: int,
+        user_list: List[Dict[str, Any]],
+        popular_anime: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Selects a representative anime for a given year.
+        Priority: User's favorite (Score > Status) > Most Popular.
+        """
+        representative = None
+        reason = ""
+        is_watched = False
+        user_score = 0
+
+        # 1. Try to find in user list
+        if user_list:
+            # Filter for anime from this year
+            candidates = []
+            for entry in user_list:
+                media = entry.get("media", {})
+                if media.get("seasonYear") == year:
+                    candidates.append(entry)
+
+            if candidates:
+                # Sort by Score (desc) -> Status (Completed first)
+                # Status priority: COMPLETED (2), CURRENT (1), others (0)
+                def status_priority(s):
+                    if s == "COMPLETED":
+                        return 2
+                    if s == "CURRENT":
+                        return 1
+                    return 0
+
+                candidates.sort(
+                    key=lambda x: (x.get("score", 0), status_priority(x.get("status"))),
+                    reverse=True,
+                )
+
+                best_entry = candidates[0]
+                representative = best_entry["media"].copy()
+                is_watched = True
+                user_score = best_entry.get("score", 0)
+                reason = "你的年度最佳"
+
+        # 2. If not found in user list, use most popular
+        if not representative and popular_anime:
+            representative = popular_anime[0].copy()
+            reason = "年度霸權"
+
+        if representative:
+            representative["is_watched"] = is_watched
+            representative["user_score"] = user_score
+            representative["selection_reason"] = reason
+            return representative
+
+        return None
+
+    def get_milestone_content(
+        self,
+        year: int,
+        user_list: List[Dict[str, Any]],
+        popular_anime: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Returns top 5 anime for a milestone year.
+        Prioritizes user watched anime, then fills with popular anime.
+        """
+        result_anime = []
+        added_ids = set()
+
+        # 1. Add User Watched Anime
+        if user_list:
+            user_candidates = []
+            for entry in user_list:
+                media = entry.get("media", {})
+                if media.get("seasonYear") == year:
+                    # Create a standardized anime object
+                    anime = media.copy()
+                    anime["is_watched"] = True
+                    anime["user_score"] = entry.get("score", 0)
+                    anime["selection_reason"] = (
+                        "你的年度最佳" if entry.get("score", 0) >= 80 else "已觀看"
+                    )
+
+                    user_candidates.append(anime)
+
+            # Sort by score descending
+            user_candidates.sort(key=lambda x: x["user_score"], reverse=True)
+
+            # Add to results (up to 5)
+            for anime in user_candidates[:5]:
+                result_anime.append(anime)
+                added_ids.add(anime["id"])
+
+        # 2. Fill with Popular Anime if needed
+        for anime in popular_anime:
+            if len(result_anime) >= 5:
+                break
+
+            if anime["id"] not in added_ids:
+                a = anime.copy()
+                a["is_watched"] = False
+                a["user_score"] = 0
+                a["selection_reason"] = "年度熱門"
+                result_anime.append(a)
+                added_ids.add(a["id"])
+
+        return result_anime
+
+    def get_timeline_milestones(self, birth_year: int) -> List[Dict[str, Any]]:
+        """
+        Generates key milestones based on birth year.
+        """
+        current_year = datetime.now().year
+
+        # Define key ages for anime viewing
+        milestones = [
+            {"age": 0, "label": "誕生之年 (0歲)"},
+            {"age": 10, "label": "童年啟蒙 (10歲)"},
+            {"age": 14, "label": "中學時期 (14歲)"},
+            {"age": 17, "label": "高中時期 (17歲)"},
+            {"age": 21, "label": "大學/社會 (21歲)"},
+        ]
+
+        timeline = []
+        for m in milestones:
+            target_year = birth_year + m["age"]
+            # We include it if it's not too far in the future
+            if target_year <= current_year + 2:
+                timeline.append(
+                    {"age": m["age"], "year": target_year, "label": m["label"]}
+                )
+
+        return timeline

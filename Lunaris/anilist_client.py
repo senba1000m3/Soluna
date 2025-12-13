@@ -79,6 +79,10 @@ class AniListClient:
                     rank
                   }
                   averageScore
+                  popularity
+                  coverImage {
+                    large
+                  }
                   episodes
                   season
                   seasonYear
@@ -261,6 +265,11 @@ class AniListClient:
           User(name: $username) {
             id
             name
+            dateOfBirth {
+              year
+              month
+              day
+            }
             avatar {
               large
             }
@@ -283,3 +292,37 @@ class AniListClient:
         except Exception as e:
             logger.error(f"Failed to fetch profile for user {username}: {e}")
             return None
+
+    async def get_top_anime_by_year(
+        self, year: int, per_page: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetches top rated/popular anime for a specific year.
+        """
+        query = """
+        query ($year: Int, $perPage: Int) {
+          Page(page: 1, perPage: $perPage) {
+            media(seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) {
+              id
+              title {
+                romaji
+                english
+              }
+              coverImage {
+                large
+              }
+              averageScore
+              popularity
+              genres
+            }
+          }
+        }
+        """
+        variables = {"year": year, "perPage": per_page}
+
+        try:
+            data = await self._post_request(query, variables)
+            return data["Page"]["media"]
+        except Exception as e:
+            logger.error(f"Failed to fetch top anime for year {year}: {e}")
+            return []
