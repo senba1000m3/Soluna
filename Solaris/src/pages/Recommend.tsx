@@ -1,5 +1,13 @@
 import React, { useState } from "react";
-import { Sparkles, Loader2, Star, Calendar, Info, X } from "lucide-react";
+import {
+  Sparkles,
+  Loader2,
+  Star,
+  Calendar,
+  Info,
+  X,
+  ExternalLink,
+} from "lucide-react";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
@@ -38,19 +46,6 @@ interface RecommendResponse {
 }
 
 export const Recommend = () => {
-  const [username, setUsername] = useState("");
-  const [year, setYear] = useState<string>("");
-  const [season, setSeason] = useState<string>("");
-  const [results, setResults] = useState<Anime[]>([]);
-  const [displayInfo, setDisplayInfo] = useState<{
-    season: string;
-    year: number;
-    display_season: string;
-  } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [selectedAnime, setSelectedAnime] = useState<Anime | null>(null);
-
   // Calculate next season
   const getNextSeason = () => {
     const now = new Date();
@@ -74,8 +69,20 @@ export const Recommend = () => {
 
   const nextSeason = getNextSeason();
 
+  const [username, setUsername] = useState("");
+  const [year, setYear] = useState<string>(nextSeason.year.toString());
+  const [season, setSeason] = useState<string>(nextSeason.season);
+  const [results, setResults] = useState<Anime[]>([]);
+  const [displayInfo, setDisplayInfo] = useState<{
+    season: string;
+    year: number;
+    display_season: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedAnime, setSelectedAnime] = useState<Anime | null>(null);
+
   const seasonOptions = [
-    { value: "", label: `${nextSeason.label}` },
     { value: "WINTER", label: "冬-1 月" },
     { value: "SPRING", label: "春-4 月" },
     { value: "SUMMER", label: "夏-7 月" },
@@ -153,7 +160,16 @@ export const Recommend = () => {
 
           <div>
             <label className="block text-sm font-medium mb-2 text-gray-300">
-              年份 (選填)
+              年份
+              <span className="ml-2 text-xs text-purple-400">
+                (下季: {nextSeason.year}{" "}
+                {
+                  seasonOptions
+                    .find((o) => o.value === nextSeason.season)
+                    ?.label?.split("-")[0]
+                }
+                )
+              </span>
             </label>
             <input
               type="number"
@@ -209,11 +225,17 @@ export const Recommend = () => {
 
       {displayInfo && (
         <div className="text-center mb-6 text-gray-300">
-          <p className="text-lg">
-            <span className="font-semibold text-purple-400">
-              {displayInfo.display_season}
-            </span>{" "}
-            ({displayInfo.year}) 推薦結果
+          <p className="text-lg flex items-center justify-center gap-2">
+            <a
+              href={`https://anilist.co/search/anime?year=${displayInfo.year}&season=${displayInfo.season}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1 transition-colors"
+            >
+              {displayInfo.display_season} ({displayInfo.year})
+              <ExternalLink className="w-4 h-4" />
+            </a>
+            推薦結果
             {username && (
               <span className="text-sm text-gray-500">
                 {" "}

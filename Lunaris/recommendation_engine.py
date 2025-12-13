@@ -219,3 +219,50 @@ class RecommendationEngine:
             reasons["top_reason"] = "基於整體偏好匹配"
 
         return reasons
+
+    def compare_users(
+        self, user1_profile: Dict[str, float], user2_profile: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """
+        Calculates compatibility score between two users based on their genre preferences.
+        """
+        if not user1_profile or not user2_profile:
+            return {
+                "score": 0.0,
+                "common_genres": [],
+                "message": "Insufficient data for comparison",
+            }
+
+        # 1. Align Genres
+        genres1 = set(user1_profile.keys())
+        genres2 = set(user2_profile.keys())
+        all_genres = list(genres1.union(genres2))
+        all_genres.sort()
+
+        # 2. Create Vectors
+        vec1 = np.array([user1_profile.get(g, 0) for g in all_genres]).reshape(1, -1)
+        vec2 = np.array([user2_profile.get(g, 0) for g in all_genres]).reshape(1, -1)
+
+        # 3. Calculate Cosine Similarity
+        similarity = cosine_similarity(vec1, vec2)[0][0]
+        score = float(similarity) * 100
+
+        # 4. Find Common Interests (Top genres for both)
+        common_genres = []
+        for g in all_genres:
+            w1 = user1_profile.get(g, 0)
+            w2 = user2_profile.get(g, 0)
+            # If both have positive weight (liked it)
+            if w1 > 0 and w2 > 0:
+                # Geometric mean as a combined score for sorting
+                combined_weight = (w1 * w2) ** 0.5
+                common_genres.append(
+                    {"genre": g.replace("Genre_", ""), "score": combined_weight}
+                )
+
+        common_genres.sort(key=lambda x: x["score"], reverse=True)
+
+        return {
+            "score": max(0.0, score),  # Ensure non-negative
+            "common_genres": common_genres[:5],
+        }

@@ -1,0 +1,25 @@
+import React from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { Navbar } from "./components/Navbar";
+import { Soluna } from "./pages/Soluna";
+import { Recommend } from "./pages/Recommend";
+import { Synergy } from "./pages/Synergy";
+
+function App() {
+  return (
+    <Router>
+      <div className="min-h-screen bg-gray-900 text-white font-sans selection:bg-purple-500 selection:text-white">
+        <Navbar />
+        <main className="p-4 md:p-8">
+          <Routes>
+            <Route path="/" element={<Soluna />} />
+            <Route path="/recommend" element={<Recommend />} />
+            <Route path="/synergy" element={<Synergy />} />
+          </Routes>
+        </main>
+      </div>
+    </Router>
+  );
+}
+
+export default App;

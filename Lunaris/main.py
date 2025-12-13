@@ -257,17 +257,29 @@ async def compare_users(request: PairCompareRequest):
                 status_code=404, detail=f"User {request.user2} not found"
             )
 
-        # TODO:
-        # 1. Fetch full anime lists for both users
-        # 2. Calculate Jaccard Similarity / Cosine Similarity on genres
-        # 3. Find overlapping watched shows
+        # Fetch lists for analysis
+        user1_list = await anilist_client.get_user_anime_list(request.user1)
+        user2_list = await anilist_client.get_user_anime_list(request.user2)
+
+        if not user1_list or not user2_list:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not fetch anime lists. Users might have private lists.",
+            )
+
+        # Build profiles
+        p1 = rec_engine.build_user_profile(user1_list)
+        p2 = rec_engine.build_user_profile(user2_list)
+
+        # Compare
+        comparison = rec_engine.compare_users(p1, p2)
 
         return {
             "user1": user1_profile,
             "user2": user2_profile,
-            "compatibility_score": 78.5,  # Mock score
-            "shared_anime_count": 0,  # Placeholder
-            "message": "Comparison logic to be implemented",
+            "compatibility_score": comparison["score"],
+            "common_genres": comparison["common_genres"],
+            "message": "Comparison successful",
         }
     except HTTPException as he:
         raise he
