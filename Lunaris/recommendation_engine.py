@@ -283,11 +283,13 @@ class RecommendationEngine:
         is_watched = False
         user_score = 0
 
-        # 1. Try to find in user list
+        # 1. Try to find in user list (only COMPLETED and CURRENT)
         if user_list:
-            # Filter for anime from this year
+            # Filter for anime from this year (only COMPLETED and CURRENT)
             candidates = []
             for entry in user_list:
+                if entry.get("status") not in ["COMPLETED", "CURRENT"]:
+                    continue
                 media = entry.get("media", {})
                 if media.get("seasonYear") == year:
                     candidates.append(entry)
@@ -339,10 +341,12 @@ class RecommendationEngine:
         result_anime = []
         added_ids = set()
 
-        # 1. Add User Watched Anime
+        # 1. Add User Watched Anime (only COMPLETED and CURRENT)
         if user_list:
             user_candidates = []
             for entry in user_list:
+                if entry.get("status") not in ["COMPLETED", "CURRENT"]:
+                    continue
                 media = entry.get("media", {})
                 if media.get("seasonYear") == year:
                     # Create a standardized anime object
@@ -409,15 +413,23 @@ class RecommendationEngine:
     ) -> Dict[str, Any]:
         """
         Calculates interesting statistics from user's list.
+        Only counts COMPLETED anime (excludes DROPPED).
         """
         if not user_list:
             return {}
 
         stats = {}
 
+        # Filter to only include COMPLETED and CURRENT anime (exclude DROPPED and PLANNING)
+        completed_list = [
+            entry
+            for entry in user_list
+            if entry.get("status") in ["COMPLETED", "CURRENT"]
+        ]
+
         # 1. Year with most watched anime
         year_counts = Counter()
-        for entry in user_list:
+        for entry in completed_list:
             media = entry.get("media", {})
             year = media.get("seasonYear")
             if year:
@@ -433,7 +445,7 @@ class RecommendationEngine:
 
         # 2. Favorite Genre
         genre_counts = Counter()
-        for entry in user_list:
+        for entry in completed_list:
             media = entry.get("media", {})
             genres = media.get("genres", [])
             for genre in genres:
@@ -447,13 +459,13 @@ class RecommendationEngine:
                 "label": "本命類型",
             }
 
-        # 3. Total Watch Time (approximate)
+        # 3. Total Watch Time (approximate, only completed anime)
         total_minutes = 0
-        for entry in user_list:
+        for entry in completed_list:
             media = entry.get("media", {})
             episodes = media.get("episodes") or 0
             duration = media.get("duration") or 24  # Default to 24 min
-            # If progress is available use it, otherwise use episodes if completed
+            # Use progress if available, otherwise use total episodes if completed
             progress = entry.get("progress") or (
                 episodes if entry.get("status") == "COMPLETED" else 0
             )

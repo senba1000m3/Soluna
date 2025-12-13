@@ -40,7 +40,7 @@ async def run_ingestion():
             await fetch_and_store_anime(session, 2023, "FALL")
 
             # Fetch seed user data
-            await fetch_and_store_user_data(session, "Gigguk")
+            await fetch_and_store_user_data(session, "senba1000m3")
 
         logger.info("Background data ingestion complete.")
     except Exception as e:
@@ -390,14 +390,22 @@ async def generate_timeline(request: TimelineRequest):
 
         # 4. Calculate Stats
         stats = rec_engine.calculate_timeline_stats(user_list)
-        birthday_chars = []
-        # AniList API does not support filtering characters by birth date.
-        # if request.birth_month and request.birth_day:
-        #     birthday_chars = await anilist_client.get_characters_by_birthday(
-        #         request.birth_month, request.birth_day
-        #     )
 
-        # 5. Build Chronological Data (Every year)
+        # 5. Fetch birthday characters (if birth date provided)
+        birthday_chars = []
+        if request.birth_month and request.birth_day:
+            try:
+                birthday_chars = await anilist_client.get_characters_by_birthday(
+                    request.birth_month, request.birth_day
+                )
+                logger.info(
+                    f"Found {len(birthday_chars)} birthday characters for {request.birth_month}/{request.birth_day}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to fetch birthday characters: {e}")
+                birthday_chars = []
+
+        # 6. Build Chronological Data (Every year)
         chronological_data = []
         for year in chronological_years:
             popular_anime = year_anime_map.get(year, [])
@@ -413,7 +421,7 @@ async def generate_timeline(request: TimelineRequest):
                     }
                 )
 
-        # 5. Build Milestones Data (Specific ages)
+        # 7. Build Milestones Data (Specific ages)
         timeline_data = []
         for m in milestones:
             year = m["year"]

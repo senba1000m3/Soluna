@@ -221,7 +221,7 @@ export const Timeline = () => {
                   if (!e.target.value) setIsDateLocked(false);
                 }}
                 onBlur={checkUser}
-                placeholder="輸入 ID 以自動獲取生日 (例如: Gigguk)"
+                placeholder="輸入 ID 以自動獲取生日 (例如: senba1000m3)"
                 className="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 outline-none transition-all text-lg"
               />
               {checkingUser && (

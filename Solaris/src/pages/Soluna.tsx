@@ -93,6 +93,8 @@ export const Soluna = () => {
             width: "300px",
             borderRadius: "4px",
             border: "1px solid #ccc",
+            color: "#222",
+            background: "#fff",
           }}
         />
         <button

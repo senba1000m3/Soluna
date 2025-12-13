@@ -107,7 +107,7 @@ export const Synergy = () => {
               type="text"
               value={user1}
               onChange={(e) => setUser1(e.target.value)}
-              placeholder="例如: Gigguk"
+              placeholder="例如: senba1000m3"
               className="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-lg"
             />
           </div>

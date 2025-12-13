@@ -166,7 +166,7 @@ async def main():
 
     # Example: Fetch a user's data
     # You can add more users here to build your dataset
-    await fetch_and_store_user_data(session, "Gigguk")
+    await fetch_and_store_user_data(session, "senba1000m3")
 
     session.close()
 

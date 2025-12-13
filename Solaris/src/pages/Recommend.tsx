@@ -152,7 +152,7 @@ export const Recommend = () => {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="例如: Gigguk"
+              placeholder="例如: senba1000m3"
               className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
             />
             <p className="text-xs text-gray-500 mt-1">留空則顯示熱門排序</p>

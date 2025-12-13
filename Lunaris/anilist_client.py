@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -328,37 +329,145 @@ class AniListClient:
     ) -> List[Dict[str, Any]]:
         """
         Fetches characters who share the same birthday.
+        Uses AniList's isBirthday filter (only works for today's date).
+        Falls back to Jikan API for other dates.
         """
-        query = """
-        query ($month: Int, $day: Int) {
-          Page(page: 1, perPage: 3) {
-            characters(birthDate: {month: $month, day: $day}, sort: FAVOURITES_DESC) {
-              id
-              name {
-                full
-                native
-              }
-              image {
-                large
-              }
-              favourites
-              media(sort: POPULARITY_DESC, perPage: 1) {
-                nodes {
-                  title {
-                    romaji
-                    english
+        from datetime import datetime
+
+        today = datetime.now()
+        is_today = today.month == month and today.day == day
+
+        # If it's today, use AniList's isBirthday filter
+        if is_today:
+            query = """
+            query {
+              Page(page: 1, perPage: 10) {
+                characters(isBirthday: true, sort: FAVOURITES_DESC) {
+                  id
+                  name {
+                    full
+                    native
+                  }
+                  dateOfBirth {
+                    month
+                    day
+                  }
+                  image {
+                    large
+                  }
+                  favourites
+                  media(sort: POPULARITY_DESC, perPage: 1) {
+                    nodes {
+                      title {
+                        romaji
+                        english
+                      }
+                    }
                   }
                 }
               }
             }
-          }
-        }
-        """
-        variables = {"month": month, "day": day}
+            """
 
+            try:
+                data = await self._post_request(query, {})
+                return data["Page"]["characters"]
+            except Exception as e:
+                logger.error(f"Failed to fetch today's birthday characters: {e}")
+                return []
+
+        # For other dates, use Jikan API (MyAnimeList)
         try:
-            data = await self._post_request(query, variables)
-            return data["Page"]["characters"]
+            import httpx
+
+            # Fetch top characters and filter by birthday
+            jikan_url = f"https://api.jikan.moe/v4/characters"
+            params = {"order_by": "favorites", "sort": "desc", "limit": 50}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(jikan_url, params=params)
+                response.raise_for_status()
+                data = response.json()
+
+                # Filter characters by birthday
+                characters = []
+                for char in data.get("data", []):
+                    if len(characters) >= 10:
+                        break
+
+                    birthday = char.get("birthday")
+                    if not birthday:
+                        continue
+
+                    # Parse birthday string (format: "YYYY-MM-DDTHH:MM:SS+00:00" or null)
+                    try:
+                        date_part = birthday.split("T")[0]
+                        parts = date_part.split("-")
+                        if len(parts) >= 3:
+                            char_month = int(parts[1])
+                            char_day = int(parts[2])
+
+                            if char_month == month and char_day == day:
+                                # Fetch detailed character info including anime
+                                char_id = char.get("mal_id")
+                                detail_url = f"https://api.jikan.moe/v4/characters/{char_id}/full"
+
+                                await asyncio.sleep(0.5)  # Rate limiting
+                                detail_response = await client.get(detail_url)
+                                if detail_response.status_code == 200:
+                                    detail_data = detail_response.json()
+                                    char_detail = detail_data.get("data", {})
+
+                                    # Get most popular anime
+                                    anime_list = char_detail.get("anime", [])
+                                    anime_title = "未知作品"
+                                    if anime_list and len(anime_list) > 0:
+                                        anime_title = (
+                                            anime_list[0]
+                                            .get("anime", {})
+                                            .get("title", "未知作品")
+                                        )
+
+                                    # Convert to AniList format
+                                    characters.append(
+                                        {
+                                            "id": char.get("mal_id"),
+                                            "name": {
+                                                "full": char.get("name"),
+                                                "native": char.get("name_kanji", ""),
+                                            },
+                                            "image": {
+                                                "large": char.get("images", {})
+                                                .get("jpg", {})
+                                                .get("image_url", "")
+                                            },
+                                            "favourites": char.get("favorites", 0),
+                                            "media": {
+                                                "nodes": [
+                                                    {
+                                                        "title": {
+                                                            "romaji": anime_title,
+                                                            "english": anime_title,
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            "source": "jikan",
+                                        }
+                                    )
+                    except (ValueError, IndexError) as parse_error:
+                        logger.debug(
+                            f"Failed to parse birthday {birthday}: {parse_error}"
+                        )
+                        continue
+
+                logger.info(
+                    f"Found {len(characters)} characters from Jikan API for {month}/{day}"
+                )
+                return characters
+
         except Exception as e:
-            logger.error(f"Failed to fetch characters for birthday {month}/{day}: {e}")
+            logger.error(
+                f"Failed to fetch characters from Jikan API for {month}/{day}: {e}"
+            )
             return []
