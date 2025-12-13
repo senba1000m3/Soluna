@@ -250,7 +250,10 @@ export const Recommend = () => {
         {results.map((anime) => (
           <div
             key={anime.id}
-            className="bg-gray-800 rounded-xl overflow-hidden hover:transform hover:scale-[1.02] transition-all duration-300 shadow-lg border border-gray-700/50"
+            className="bg-gray-800 rounded-xl overflow-hidden hover:transform hover:scale-[1.02] transition-all duration-300 shadow-lg border border-gray-700/50 cursor-pointer"
+            onClick={() =>
+              window.open(`https://anilist.co/anime/${anime.id}`, "_blank")
+            }
           >
             <div className="relative">
               <img
@@ -261,7 +264,10 @@ export const Recommend = () => {
               {anime.match_score !== undefined && anime.match_reasons && (
                 <>
                   <button
-                    onClick={() => setSelectedAnime(anime)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedAnime(anime);
+                    }}
                     className="absolute top-2 left-2 bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition-colors"
                     title="查看匹配原因"
                   >
@@ -274,7 +280,7 @@ export const Recommend = () => {
               )}
             </div>
             <div className="p-4">
-              <h3 className="font-bold text-lg line-clamp-2 mb-2 text-purple-100">
+              <h3 className="font-bold text-lg line-clamp-2 mb-2 text-purple-100 hover:text-purple-300 transition-colors">
                 {anime.title.english || anime.title.romaji}
               </h3>
               <div className="flex flex-wrap gap-2 mb-3">
@@ -334,7 +340,7 @@ export const Recommend = () => {
               </h3>
               <div className="flex items-center gap-2 mb-3">
                 <div className="bg-purple-600 px-3 py-1 rounded-full text-sm font-bold">
-                  {selectedAnime.match_score?.toFixed(0)}% 匹配度
+                  匹配度：{selectedAnime.match_score?.toFixed(0)}%
                 </div>
               </div>
             </div>

@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 from anilist_client import AniListClient
 from database import engine, get_session, init_db
 from drop_analysis_engine import DropAnalysisEngine
+from hybrid_recommendation_engine import HybridRecommendationEngine
 from ingest_data import fetch_and_store_anime, fetch_and_store_user_data
 from models import User
 from recommendation_engine import RecommendationEngine
@@ -77,6 +78,15 @@ app.add_middleware(
 anilist_client = AniListClient()
 rec_engine = RecommendationEngine()
 drop_engine = DropAnalysisEngine()
+
+# Initialize Hybrid Recommendation Engine
+# 設置 use_bert=False 暫時不使用 BERT，等模型下載後再啟用
+try:
+    hybrid_rec_engine = HybridRecommendationEngine(use_bert=False)
+    logger.info("Hybrid recommendation engine initialized (content-only mode)")
+except Exception as e:
+    logger.error(f"Failed to initialize hybrid engine: {e}")
+    hybrid_rec_engine = None
 
 # --- Helper Functions ---
 
@@ -202,8 +212,8 @@ async def search_anime(request: SearchRequest):
 @app.post("/recommend")
 async def recommend_anime(request: RecommendRequest):
     """
-    Get seasonal recommendations.
-    If username is provided, sorts by compatibility score.
+    Get seasonal recommendations using hybrid recommendation engine.
+    If username is provided, uses BERT + content-based filtering.
     Defaults to the next season if season/year are not provided.
     """
     try:
@@ -224,14 +234,26 @@ async def recommend_anime(request: RecommendRequest):
             season=target_season, year=target_year
         )
 
-        # 2. If username provided, calculate personalized scores
-        user_profile = {}
+        # 2. If username provided, use hybrid recommendation
         if request.username:
-            logger.info(f"Building profile for user: {request.username}")
+            logger.info(f"Building hybrid profile for user: {request.username}")
             user_list = await anilist_client.get_user_anime_list(request.username)
+
             if user_list:
-                user_profile = rec_engine.build_user_profile(user_list)
-                anime_list = rec_engine.recommend_seasonal(user_profile, anime_list)
+                # Use hybrid engine if available, otherwise fall back to content-only
+                if hybrid_rec_engine:
+                    logger.info("Using hybrid recommendation engine...")
+                    anime_list = hybrid_rec_engine.recommend_seasonal(
+                        user_list=user_list,
+                        seasonal_anime=anime_list,
+                        bert_weight=0.6,
+                        content_weight=0.4,
+                        top_reference_anime=50,
+                    )
+                else:
+                    logger.warning("Hybrid engine not available, using content-only")
+                    user_profile = rec_engine.build_user_profile(user_list)
+                    anime_list = rec_engine.recommend_seasonal(user_profile, anime_list)
             else:
                 logger.warning(
                     f"No list found for {request.username}, returning raw popularity list."
@@ -246,6 +268,104 @@ async def recommend_anime(request: RecommendRequest):
 
     except Exception as e:
         logger.error(f"Error in recommend endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/recommend/status")
+def get_recommendation_status():
+    """
+    Get the status of the recommendation engine (BERT availability, mode, etc.)
+    """
+    try:
+        status = {
+            "hybrid_engine_available": hybrid_rec_engine is not None,
+            "mode": "content_only",
+            "bert_enabled": False,
+            "bert_weight": 0.0,
+            "content_weight": 1.0,
+        }
+
+        if hybrid_rec_engine:
+            status["bert_enabled"] = hybrid_rec_engine.use_bert
+            status["bert_available"] = (
+                hybrid_rec_engine.bert_recommender is not None
+                and hybrid_rec_engine.bert_recommender.is_available()
+            )
+
+            if status["bert_enabled"] and status.get("bert_available", False):
+                status["mode"] = "hybrid"
+                status["bert_weight"] = 0.6
+                status["content_weight"] = 0.4
+            else:
+                status["mode"] = "content_only"
+                status["bert_weight"] = 0.0
+                status["content_weight"] = 1.0
+
+        return status
+
+    except Exception as e:
+        logger.error(f"Error getting recommendation status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/debug/user_profile")
+async def debug_user_profile(request: UserInfoRequest):
+    """
+    調試端點：檢查用戶 profile 是否正確建立
+    """
+    try:
+        logger.info(f"Building profile for debug: {request.username}")
+
+        # 獲取用戶列表
+        user_list = await anilist_client.get_user_anime_list(request.username)
+
+        if not user_list:
+            return {
+                "error": "No user list found",
+                "username": request.username,
+            }
+
+        # 建立 profile
+        user_profile = rec_engine.build_user_profile(user_list)
+
+        # 統計資訊
+        scored_entries = [
+            e
+            for e in user_list
+            if e["status"] in ["COMPLETED", "CURRENT"] and e["score"] > 0
+        ]
+
+        # 提取 genre 權重
+        genre_weights = {
+            k.replace("Genre_", ""): v
+            for k, v in user_profile.items()
+            if k.startswith("Genre_")
+        }
+
+        # 排序
+        sorted_genres = sorted(genre_weights.items(), key=lambda x: x[1], reverse=True)
+
+        return {
+            "username": request.username,
+            "total_entries": len(user_list),
+            "scored_entries": len(scored_entries),
+            "profile_features": len(user_profile),
+            "profile_has_data": len(user_profile) > 0,
+            "top_10_genres": dict(sorted_genres[:10]),
+            "sample_scored_anime": [
+                {
+                    "title": e.get("media", {})
+                    .get("title", {})
+                    .get("romaji", "Unknown"),
+                    "score": e.get("score", 0),
+                    "genres": e.get("media", {}).get("genres", []),
+                }
+                for e in scored_entries[:5]
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

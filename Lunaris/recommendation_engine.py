@@ -51,23 +51,22 @@ class RecommendationEngine:
         Builds a user preference vector based on their watched history.
 
         Logic:
-        1. Filter for Completed or Watching.
+        1. Filter for Completed or Watching (score is optional).
         2. Calculate weighted score for each genre:
-           Weight = (UserScore - MeanUserScore) * GenrePresence
+           - If has score: Weight = (UserScore - MeanUserScore) + 1.0
+           - If no score: Weight = 1.0 (neutral positive)
         3. Normalize the vector.
         """
         if not user_list:
             return {}
 
-        # Filter valid entries (Completed or Watching, and has a score)
+        # Filter valid entries (Completed or Watching, score is optional)
         valid_entries = [
-            e
-            for e in user_list
-            if e["status"] in ["COMPLETED", "CURRENT"] and e["score"] > 0
+            e for e in user_list if e["status"] in ["COMPLETED", "CURRENT"]
         ]
 
         if not valid_entries:
-            logger.warning("User has no scored entries to build profile.")
+            logger.warning("User has no completed or current entries to build profile.")
             return {}
 
         # Convert to DataFrame
@@ -76,9 +75,17 @@ class RecommendationEngine:
         if df.empty:
             return {}
 
-        # Calculate User's Mean Score to center the ratings
-        # (e.g. if user rates everything 90, a 70 is actually 'bad')
-        user_mean_score = df["score"].mean()
+        # Check if user has any scores
+        has_scores = (df["score"] > 0).any()
+
+        if has_scores:
+            # Calculate User's Mean Score to center the ratings
+            scored_df = df[df["score"] > 0]
+            user_mean_score = scored_df["score"].mean()
+        else:
+            # No scores available, use default
+            user_mean_score = 0
+            logger.info("User has no scores, using watch history only")
 
         # Calculate Weighted Genre Scores
         # We look at columns starting with "Genre_"
@@ -87,22 +94,26 @@ class RecommendationEngine:
         user_profile = defaultdict(float)
 
         for _, row in df.iterrows():
-            # Centered Score: How much better/worse than average did they like this?
-            # We add a small epsilon or base weight so even average shows contribute slightly to genre preference
-            weight = (row["score"] - user_mean_score) + 0.1
+            # Calculate weight based on whether score exists
+            if row["score"] > 0 and has_scores:
+                # Centered Score: How much better/worse than average did they like this?
+                weight = (row["score"] - user_mean_score) + 1.0
+            else:
+                # No score: just count as watched (neutral positive)
+                weight = 1.0
 
-            # If weight is negative (they disliked it), it reduces the genre score
-
+            # Add to genre weights
             for col in genre_cols:
                 if row[col] == 1:
                     user_profile[col] += weight
 
-        # Normalize profile vector
-        # Convert to list for normalization
-        profile_vector = np.array(list(user_profile.values())).reshape(1, -1)
-        if profile_vector.size > 0:
-            # We don't strictly need 0-1 normalization for Cosine, but it helps for debugging
-            pass
+        # Normalize profile vector to sum to reasonable scale
+        if user_profile:
+            total_weight = sum(user_profile.values())
+            if total_weight > 0:
+                # Normalize to maintain relative weights
+                max_weight = max(user_profile.values())
+                user_profile = {k: v / max_weight for k, v in user_profile.items()}
 
         return dict(user_profile)
 
