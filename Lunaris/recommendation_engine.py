@@ -403,3 +403,67 @@ class RecommendationEngine:
                 )
 
         return timeline
+
+    def calculate_timeline_stats(
+        self, user_list: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Calculates interesting statistics from user's list.
+        """
+        if not user_list:
+            return {}
+
+        stats = {}
+
+        # 1. Year with most watched anime
+        year_counts = Counter()
+        for entry in user_list:
+            media = entry.get("media", {})
+            year = media.get("seasonYear")
+            if year:
+                year_counts[year] += 1
+
+        if year_counts:
+            most_watched_year, count = year_counts.most_common(1)[0]
+            stats["most_active_year"] = {
+                "year": most_watched_year,
+                "count": count,
+                "label": "動畫成癮年",
+            }
+
+        # 2. Favorite Genre
+        genre_counts = Counter()
+        for entry in user_list:
+            media = entry.get("media", {})
+            genres = media.get("genres", [])
+            for genre in genres:
+                genre_counts[genre] += 1
+
+        if genre_counts:
+            fav_genre, count = genre_counts.most_common(1)[0]
+            stats["favorite_genre"] = {
+                "genre": fav_genre,
+                "count": count,
+                "label": "本命類型",
+            }
+
+        # 3. Total Watch Time (approximate)
+        total_minutes = 0
+        for entry in user_list:
+            media = entry.get("media", {})
+            episodes = media.get("episodes") or 0
+            duration = media.get("duration") or 24  # Default to 24 min
+            # If progress is available use it, otherwise use episodes if completed
+            progress = entry.get("progress") or (
+                episodes if entry.get("status") == "COMPLETED" else 0
+            )
+            total_minutes += progress * duration
+
+        days = total_minutes / (60 * 24)
+        stats["total_watch_time"] = {
+            "days": round(days, 1),
+            "hours": round(total_minutes / 60, 1),
+            "label": "人生獻祭時間",
+        }
+
+        return stats

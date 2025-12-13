@@ -119,6 +119,8 @@ class PairCompareRequest(BaseModel):
 class TimelineRequest(BaseModel):
     username: Optional[str] = None
     birth_year: int
+    birth_month: Optional[int] = None
+    birth_day: Optional[int] = None
 
 
 class UserInfoRequest(BaseModel):
@@ -336,7 +338,7 @@ async def generate_timeline(request: TimelineRequest):
 
         # 3. Fetch popular anime for ALL years in parallel (with rate limiting)
         # AniList has a rate limit. We use a semaphore to limit concurrent requests.
-        semaphore = asyncio.Semaphore(2)
+        semaphore = asyncio.Semaphore(3)
 
         async def fetch_with_semaphore(year):
             for attempt in range(3):
@@ -357,7 +359,16 @@ async def generate_timeline(request: TimelineRequest):
         results = await asyncio.gather(*tasks)
         year_anime_map = {year: res for year, res in zip(all_years, results)}
 
-        # 4. Build Chronological Data (Every year)
+        # 4. Calculate Stats
+        stats = rec_engine.calculate_timeline_stats(user_list)
+        birthday_chars = []
+        # AniList API does not support filtering characters by birth date.
+        # if request.birth_month and request.birth_day:
+        #     birthday_chars = await anilist_client.get_characters_by_birthday(
+        #         request.birth_month, request.birth_day
+        #     )
+
+        # 5. Build Chronological Data (Every year)
         chronological_data = []
         for year in chronological_years:
             popular_anime = year_anime_map.get(year, [])
@@ -391,6 +402,8 @@ async def generate_timeline(request: TimelineRequest):
             "birth_year": request.birth_year,
             "chronological_data": chronological_data,
             "timeline_data": timeline_data,
+            "stats": stats,
+            "birthday_characters": birthday_chars,
         }
 
     except Exception as e:

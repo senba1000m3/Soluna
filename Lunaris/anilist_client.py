@@ -326,3 +326,43 @@ class AniListClient:
         except Exception as e:
             logger.error(f"Failed to fetch top anime for year {year}: {e}")
             return []
+
+    async def get_characters_by_birthday(
+        self, month: int, day: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetches characters who share the same birthday.
+        """
+        query = """
+        query ($month: Int, $day: Int) {
+          Page(page: 1, perPage: 3) {
+            characters(birthDate: {month: $month, day: $day}, sort: FAVOURITES_DESC) {
+              id
+              name {
+                full
+                native
+              }
+              image {
+                large
+              }
+              favourites
+              media(sort: POPULARITY_DESC, perPage: 1) {
+                nodes {
+                  title {
+                    romaji
+                    english
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        variables = {"month": month, "day": day}
+
+        try:
+            data = await self._post_request(query, variables)
+            return data["Page"]["characters"]
+        except Exception as e:
+            logger.error(f"Failed to fetch characters for birthday {month}/{day}: {e}")
+            return []

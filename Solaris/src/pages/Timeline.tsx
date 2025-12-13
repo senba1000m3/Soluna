@@ -7,6 +7,8 @@ import {
   Film,
   Star,
   ExternalLink,
+  Trophy,
+  Cake,
 } from "lucide-react";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
@@ -41,11 +43,51 @@ interface ChronologicalEntry {
   anime: Anime;
 }
 
+interface TimelineStats {
+  most_active_year?: {
+    year: number;
+    count: number;
+    label: string;
+  };
+  favorite_genre?: {
+    genre: string;
+    count: number;
+    label: string;
+  };
+  total_watch_time?: {
+    days: number;
+    hours: number;
+    label: string;
+  };
+}
+
+interface BirthdayCharacter {
+  id: number;
+  name: {
+    full: string;
+    native: string;
+  };
+  image: {
+    large: string;
+  };
+  favourites: number;
+  media: {
+    nodes: {
+      title: {
+        romaji: string;
+        english: string | null;
+      };
+    }[];
+  };
+}
+
 interface TimelineResponse {
   username: string;
   birth_year: number;
   timeline_data: TimelineMilestone[];
   chronological_data: ChronologicalEntry[];
+  stats?: TimelineStats;
+  birthday_characters?: BirthdayCharacter[];
 }
 
 export const Timeline = () => {
@@ -129,6 +171,8 @@ export const Timeline = () => {
         body: JSON.stringify({
           username: username.trim() || null,
           birth_year: yearInt,
+          birth_month: birthMonth ? parseInt(birthMonth) : null,
+          birth_day: birthDay ? parseInt(birthDay) : null,
         }),
       });
 
@@ -280,6 +324,110 @@ export const Timeline = () => {
         result.chronological_data &&
         result.chronological_data.length > 0 && (
           <div className="space-y-16 pb-20">
+            {/* Stats & Birthday Section */}
+            {(result.stats ||
+              (result.birthday_characters &&
+                result.birthday_characters.length > 0)) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Stats */}
+                {result.stats && Object.keys(result.stats).length > 0 && (
+                  <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                    <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2 border-b border-gray-700 pb-3">
+                      <Trophy className="w-5 h-5 text-amber-500" />
+                      你的動畫數據
+                    </h3>
+                    <div className="space-y-6">
+                      {result.stats.most_active_year && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400 text-sm">
+                            {result.stats.most_active_year.label}
+                          </span>
+                          <div className="text-right">
+                            <span className="text-2xl font-bold text-white block">
+                              {result.stats.most_active_year.year}
+                            </span>
+                            <span className="text-xs text-amber-500">
+                              看了 {result.stats.most_active_year.count} 部
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                      {result.stats.favorite_genre && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400 text-sm">
+                            {result.stats.favorite_genre.label}
+                          </span>
+                          <div className="text-right">
+                            <span className="text-2xl font-bold text-white block">
+                              {result.stats.favorite_genre.genre}
+                            </span>
+                            <span className="text-xs text-amber-500">
+                              看了 {result.stats.favorite_genre.count} 部
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                      {result.stats.total_watch_time && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400 text-sm">
+                            {result.stats.total_watch_time.label}
+                          </span>
+                          <div className="text-right">
+                            <span className="text-2xl font-bold text-white block">
+                              {result.stats.total_watch_time.days} 天
+                            </span>
+                            <span className="text-xs text-amber-500">
+                              約 {result.stats.total_watch_time.hours} 小時
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Birthday Characters */}
+                {result.birthday_characters &&
+                  result.birthday_characters.length > 0 && (
+                    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                      <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2 border-b border-gray-700 pb-3">
+                        <Cake className="w-5 h-5 text-pink-500" />
+                        與你同天生日的角色
+                      </h3>
+                      <div className="grid grid-cols-3 gap-4">
+                        {result.birthday_characters.map((char) => (
+                          <div
+                            key={char.id}
+                            className="text-center group cursor-pointer"
+                            onClick={() =>
+                              window.open(
+                                `https://anilist.co/character/${char.id}`,
+                                "_blank",
+                              )
+                            }
+                          >
+                            <div className="w-20 h-20 mx-auto rounded-full overflow-hidden border-2 border-gray-600 group-hover:border-pink-500 transition-colors mb-2 shadow-md">
+                              <img
+                                src={char.image.large}
+                                alt={char.name.full}
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                            <p className="text-xs text-white font-medium truncate px-1">
+                              {char.name.full}
+                            </p>
+                            <p className="text-[10px] text-gray-500 truncate px-1">
+                              {char.media.nodes[0]?.title.english ||
+                                char.media.nodes[0]?.title.romaji}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+              </div>
+            )}
+
             {/* Chronological Flow Section */}
             <div>
               <h2 className="text-2xl font-bold text-white mb-8 flex items-center gap-2">
