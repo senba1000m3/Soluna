@@ -259,17 +259,13 @@ class AniListClient:
     async def get_user_profile(self, username: str) -> Optional[Dict[str, Any]]:
         """
         Fetches basic user profile info.
+        Note: dateOfBirth is removed as it's private and causes 400 errors.
         """
         query = """
         query ($username: String) {
           User(name: $username) {
             id
             name
-            dateOfBirth {
-              year
-              month
-              day
-            }
             avatar {
               large
             }

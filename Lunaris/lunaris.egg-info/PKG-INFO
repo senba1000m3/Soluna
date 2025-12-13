@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: lunaris
+Version: 0.1.0
+Summary: Backend for Ani-Risk Project (AniList Analytics)
+Requires-Python: >=3.12
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn>=0.32.0
+Requires-Dist: pandas>=2.2.0
+Requires-Dist: numpy>=2.0.0
+Requires-Dist: scikit-learn>=1.5.0
+Requires-Dist: xgboost>=2.1.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: requests>=2.32.0
+Requires-Dist: sqlmodel>=0.0.22

@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Search, Sparkles, Users, Clock } from "lucide-react";
+import { Search, Sparkles, Users, Clock, AlertTriangle } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -57,6 +57,14 @@ export const Navbar = () => {
             >
               <Clock className="w-4 h-4" />
               動畫大世紀
+            </Link>
+
+            <Link
+              to="/drop-predict"
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${isActive("/drop-predict")}`}
+            >
+              <AlertTriangle className="w-4 h-4" />
+              棄番預測
             </Link>
           </div>
         </div>

@@ -10,7 +10,9 @@ from sqlmodel import Session
 
 # Import the client we created
 from anilist_client import AniListClient
-from database import get_session, init_db
+from database import engine, get_session, init_db
+from drop_analysis_engine import DropAnalysisEngine
+from ingest_data import fetch_and_store_anime, fetch_and_store_user_data
 from models import User
 from recommendation_engine import RecommendationEngine
 
@@ -25,9 +27,31 @@ app = FastAPI(
 )
 
 
+async def run_ingestion():
+    """
+    Runs data ingestion in the background.
+    """
+    logger.info("Starting background data ingestion...")
+    try:
+        with Session(engine) as session:
+            # Fetch some initial data
+            # Current season and previous season
+            await fetch_and_store_anime(session, 2024, "WINTER")
+            await fetch_and_store_anime(session, 2023, "FALL")
+
+            # Fetch seed user data
+            await fetch_and_store_user_data(session, "Gigguk")
+
+        logger.info("Background data ingestion complete.")
+    except Exception as e:
+        logger.error(f"Background ingestion failed: {e}")
+
+
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
+    # Run ingestion in background without blocking startup
+    asyncio.create_task(run_ingestion())
 
 
 # Configure CORS to allow requests from the frontend
@@ -52,6 +76,7 @@ app.add_middleware(
 # but the current implementation in AniListClient creates a new client per request which is safe but less efficient.
 anilist_client = AniListClient()
 rec_engine = RecommendationEngine()
+drop_engine = DropAnalysisEngine()
 
 # --- Helper Functions ---
 
@@ -124,6 +149,10 @@ class TimelineRequest(BaseModel):
 
 
 class UserInfoRequest(BaseModel):
+    username: str
+
+
+class AnalyzeDropsRequest(BaseModel):
     username: str
 
 
@@ -409,3 +438,147 @@ async def generate_timeline(request: TimelineRequest):
     except Exception as e:
         logger.error(f"Error generating timeline: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/analyze_drops")
+async def analyze_drops(
+    request: AnalyzeDropsRequest, session: Session = Depends(get_session)
+):
+    """
+    Fetches user's dropped list, stores data, trains model, and returns analysis.
+    Now includes predictions for watching/planning anime and drop pattern statistics.
+    """
+    try:
+        logger.info(f"Starting drop analysis for user: {request.username}")
+
+        # Check if user exists first
+        logger.info(f"Checking if user {request.username} exists on AniList...")
+        profile = await anilist_client.get_user_profile(request.username)
+        if not profile:
+            logger.error(f"User {request.username} not found on AniList")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User '{request.username}' not found on AniList. Please check the username.",
+            )
+
+        logger.info(f"User found: {profile.get('name')} (ID: {profile.get('id')})")
+
+        # 1. Fetch and Store User Data (Ingest)
+        logger.info(f"Fetching and storing anime list for {request.username}...")
+        try:
+            await fetch_and_store_user_data(session, request.username)
+            logger.info("User data stored successfully")
+        except Exception as e:
+            logger.error(f"Error fetching/storing user data: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to fetch anime list: {str(e)}"
+            )
+
+        # 2. Train Model on all data in DB
+        logger.info("Training drop prediction model...")
+        try:
+            train_result = drop_engine.train_model(session)
+            logger.info(f"Model training complete: {train_result}")
+        except Exception as e:
+            logger.error(f"Error training model: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to train model: {str(e)}"
+            )
+
+        # 3. Get User's List and categorize
+        logger.info("Fetching and analyzing user's anime list...")
+        try:
+            from sqlmodel import select
+
+            from models import Anime as AnimeModel
+
+            user_list = await anilist_client.get_user_anime_list(request.username)
+            dropped_list = []
+            watching_list = []
+            planning_list = []
+
+            for entry in user_list:
+                status = entry.get("status", "").upper()
+                media = entry.get("media", {})
+                anime_id = media.get("id")
+                title = media.get("title", {})
+                cover = media.get("coverImage") or {}
+
+                base_info = {
+                    "id": anime_id,
+                    "title": title.get("english")
+                    or title.get("romaji")
+                    or "Unknown Title",
+                    "cover": cover.get("large"),
+                    "score": entry.get("score", 0),
+                    "progress": entry.get("progress", 0),
+                    "total_episodes": media.get("episodes"),
+                    "genres": media.get("genres", []),
+                }
+
+                if status == "DROPPED":
+                    dropped_list.append(base_info)
+                elif status in ["CURRENT", "PLANNING"]:
+                    # Get anime from DB for prediction
+                    anime = session.get(AnimeModel, anime_id)
+                    if anime and drop_engine.is_trained:
+                        drop_probability = drop_engine.predict_drop_probability(anime)
+                        base_info["drop_probability"] = float(drop_probability)
+                    else:
+                        base_info["drop_probability"] = None
+
+                    if status == "CURRENT":
+                        watching_list.append(base_info)
+                    else:
+                        planning_list.append(base_info)
+
+            # Sort by drop probability (highest first)
+            watching_list.sort(
+                key=lambda x: x.get("drop_probability") or 0, reverse=True
+            )
+            planning_list.sort(
+                key=lambda x: x.get("drop_probability") or 0, reverse=True
+            )
+
+            logger.info(
+                f"Found {len(dropped_list)} dropped, {len(watching_list)} watching, {len(planning_list)} planning"
+            )
+        except Exception as e:
+            logger.error(f"Error processing anime list: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to process anime list: {str(e)}"
+            )
+
+        # 4. Analyze drop patterns
+        logger.info("Analyzing drop patterns...")
+        try:
+            from sqlmodel import select
+
+            ratings = session.exec(select(UserRating)).all()
+            animes = session.exec(select(AnimeModel)).all()
+            drop_patterns = drop_engine.analyze_drop_patterns(ratings, animes)
+            logger.info("Drop pattern analysis complete")
+        except Exception as e:
+            logger.error(f"Error analyzing drop patterns: {e}")
+            drop_patterns = {
+                "top_dropped_tags": [],
+                "top_dropped_genres": [],
+                "top_dropped_studios": [],
+            }
+
+        return {
+            "username": request.username,
+            "dropped_count": len(dropped_list),
+            "dropped_list": dropped_list,
+            "watching_list": watching_list,
+            "planning_list": planning_list,
+            "model_metrics": train_result,
+            "drop_patterns": drop_patterns,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in analyze_drops: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"An unexpected error occurred: {str(e)}"
+        )
