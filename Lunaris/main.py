@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 # Import the client we created
 from anilist_client import AniListClient
@@ -449,6 +449,13 @@ async def analyze_drops(
     Now includes predictions for watching/planning anime and drop pattern statistics.
     """
     try:
+        # Import needed models at function start
+        from sqlmodel import select
+
+        from models import Anime as AnimeModel
+        from models import User as UserModel
+        from models import UserRating
+
         logger.info(f"Starting drop analysis for user: {request.username}")
 
         # Check if user exists first
@@ -474,10 +481,20 @@ async def analyze_drops(
                 status_code=500, detail=f"Failed to fetch anime list: {str(e)}"
             )
 
-        # 2. Train Model on all data in DB
-        logger.info("Training drop prediction model...")
+        # 2. Train personalized model for this user
+        logger.info("Training personalized drop prediction model...")
         try:
-            train_result = drop_engine.train_model(session)
+            # Get user ID for personalized training
+            db_user = session.exec(
+                select(UserModel).where(UserModel.username == request.username)
+            ).first()
+
+            if not db_user:
+                raise HTTPException(
+                    status_code=404, detail="User not found in database"
+                )
+
+            train_result = drop_engine.train_model(session, user_id=db_user.id)
             logger.info(f"Model training complete: {train_result}")
         except Exception as e:
             logger.error(f"Error training model: {e}")
@@ -488,10 +505,6 @@ async def analyze_drops(
         # 3. Get User's List and categorize
         logger.info("Fetching and analyzing user's anime list...")
         try:
-            from sqlmodel import select
-
-            from models import Anime as AnimeModel
-
             user_list = await anilist_client.get_user_anime_list(request.username)
             dropped_list = []
             watching_list = []
@@ -522,10 +535,27 @@ async def analyze_drops(
                     # Get anime from DB for prediction
                     anime = session.get(AnimeModel, anime_id)
                     if anime and drop_engine.is_trained:
-                        drop_probability = drop_engine.predict_drop_probability(anime)
-                        base_info["drop_probability"] = float(drop_probability)
+                        # Get user ID for tolerance-based prediction
+                        db_user = session.exec(
+                            select(UserModel).where(
+                                UserModel.username == request.username
+                            )
+                        ).first()
+
+                        if db_user:
+                            drop_probability, reasons = (
+                                drop_engine.predict_drop_probability(
+                                    anime, db_user.id, session
+                                )
+                            )
+                            base_info["drop_probability"] = float(drop_probability)
+                            base_info["drop_reasons"] = reasons
+                        else:
+                            base_info["drop_probability"] = None
+                            base_info["drop_reasons"] = []
                     else:
                         base_info["drop_probability"] = None
+                        base_info["drop_reasons"] = []
 
                     if status == "CURRENT":
                         watching_list.append(base_info)
@@ -552,8 +582,6 @@ async def analyze_drops(
         # 4. Analyze drop patterns
         logger.info("Analyzing drop patterns...")
         try:
-            from sqlmodel import select
-
             ratings = session.exec(select(UserRating)).all()
             animes = session.exec(select(AnimeModel)).all()
             drop_patterns = drop_engine.analyze_drop_patterns(ratings, animes)

@@ -1,14 +1,11 @@
 import logging
-import pickle
-from collections import Counter
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
-import xgboost as xgb
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
-from sqlmodel import Session, select
+from sqlmodel import Session
+from xgboost import XGBClassifier
 
 from models import Anime, UserRating
 
@@ -17,385 +14,534 @@ logger = logging.getLogger(__name__)
 
 class DropAnalysisEngine:
     def __init__(self):
-        self.model = None
+        self.model: XGBClassifier | None = None
+        self.feature_columns: list[str] = []
         self.mlb_genres = MultiLabelBinarizer()
         self.mlb_tags = MultiLabelBinarizer()
         self.le_studio = LabelEncoder()
         self.is_trained = False
-        self.feature_columns = None  # Store feature columns for prediction
 
-    def _prepare_features(
-        self, ratings: List[UserRating], animes: List[Anime]
-    ) -> pd.DataFrame:
-        """
-        Converts DB records into a feature DataFrame for ML.
-        Features:
-        - Genres (One-Hot)
-        - Tags (One-Hot, top N)
-        - Episodes (Numerical)
-        - Season (Categorical -> One-Hot)
-        - Studio (Categorical -> Label Encoded)
-        - Average Score (Numerical)
-        - Popularity (Numerical)
-        """
-        data = []
-        anime_map = {a.id: a for a in animes}
+        # Store user tolerance metrics for inference
+        self.user_tolerance_cache = {}
 
-        for r in ratings:
-            anime = anime_map.get(r.anime_id)
+    def _calculate_user_tolerance_metrics(
+        self, user_id: int, session: Session
+    ) -> dict[str, float]:
+        """
+        Calculate user's historical tolerance metrics.
+        Returns metrics like genre drop rates, studio drop rates, etc.
+        """
+        from sqlmodel import select
+
+        # Get all user ratings
+        user_ratings = session.exec(
+            select(UserRating).where(UserRating.user_id == user_id)
+        ).all()
+
+        if not user_ratings:
+            return {}
+
+        metrics = {
+            "total_anime": len(user_ratings),
+            "total_dropped": sum(1 for r in user_ratings if r.status == "DROPPED"),
+            "total_completed": sum(1 for r in user_ratings if r.status == "COMPLETED"),
+            "overall_drop_rate": 0.0,
+            "avg_completion_ratio": 0.0,
+            "genre_drop_rates": {},
+            "studio_drop_rates": {},
+            "tag_drop_rates": {},
+        }
+
+        if metrics["total_anime"] > 0:
+            metrics["overall_drop_rate"] = (
+                metrics["total_dropped"] / metrics["total_anime"]
+            )
+
+        # Calculate completion ratios
+        completion_ratios = []
+        for rating in user_ratings:
+            anime = session.get(Anime, rating.anime_id)
+            if anime and anime.episodes and anime.episodes > 0:
+                ratio = (rating.progress or 0) / anime.episodes
+                completion_ratios.append(min(ratio, 1.0))
+
+        if completion_ratios:
+            metrics["avg_completion_ratio"] = np.mean(completion_ratios)
+
+        # Calculate genre-specific drop rates
+        genre_counts = {}
+        genre_drops = {}
+        for rating in user_ratings:
+            anime = session.get(Anime, rating.anime_id)
+            if anime and anime.genres:
+                genres = [g.strip() for g in anime.genres.split(",") if g.strip()]
+                for genre in genres:
+                    genre_counts[genre] = genre_counts.get(genre, 0) + 1
+                    if rating.status == "DROPPED":
+                        genre_drops[genre] = genre_drops.get(genre, 0) + 1
+
+        for genre, count in genre_counts.items():
+            if count >= 2:  # Only consider genres with at least 2 samples
+                drops = genre_drops.get(genre, 0)
+                metrics["genre_drop_rates"][genre] = drops / count
+
+        # Calculate studio-specific drop rates
+        studio_counts = {}
+        studio_drops = {}
+        for rating in user_ratings:
+            anime = session.get(Anime, rating.anime_id)
+            if anime and anime.studios:
+                studio = anime.studios.split(",")[0].strip()
+                if studio:
+                    studio_counts[studio] = studio_counts.get(studio, 0) + 1
+                    if rating.status == "DROPPED":
+                        studio_drops[studio] = studio_drops.get(studio, 0) + 1
+
+        for studio, count in studio_counts.items():
+            if count >= 2:
+                drops = studio_drops.get(studio, 0)
+                metrics["studio_drop_rates"][studio] = drops / count
+
+        # Calculate tag-specific drop rates
+        tag_counts = {}
+        tag_drops = {}
+        for rating in user_ratings:
+            anime = session.get(Anime, rating.anime_id)
+            if anime and anime.tags:
+                tags = [t.strip() for t in anime.tags.split(",") if t.strip()]
+                for tag in tags[:10]:  # Consider top 10 tags
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+                    if rating.status == "DROPPED":
+                        tag_drops[tag] = tag_drops.get(tag, 0) + 1
+
+        for tag, count in tag_counts.items():
+            if count >= 2:
+                drops = tag_drops.get(tag, 0)
+                metrics["tag_drop_rates"][tag] = drops / count
+
+        return metrics
+
+    def _prepare_features(self, session: Session, user_id: int = None) -> pd.DataFrame:
+        """
+        Prepare feature matrix from anime metadata.
+        For personalized training (user_id provided), uses only that user's ratings.
+        """
+        from sqlmodel import select
+
+        # Get all ratings (optionally filtered by user)
+        if user_id:
+            ratings = session.exec(
+                select(UserRating).where(UserRating.user_id == user_id)
+            ).all()
+        else:
+            ratings = session.exec(select(UserRating)).all()
+
+        if not ratings:
+            logger.warning("No ratings found for feature preparation")
+            return pd.DataFrame()
+
+        rows = []
+        for rating in ratings:
+            # Skip non-terminal states for training
+            if rating.status not in ["DROPPED", "COMPLETED"]:
+                continue
+
+            anime = session.get(Anime, rating.anime_id)
             if not anime:
                 continue
 
-            # Target: 1 if DROPPED, 0 if COMPLETED
-            # We ignore watching/paused for training binary classifier
-            if r.status == "DROPPED":
-                target = 1
-            elif r.status == "COMPLETED":
-                target = 0
-            else:
-                continue
+            # Parse metadata
+            genres = [g.strip() for g in (anime.genres or "").split(",") if g.strip()]
+            tags = [t.strip() for t in (anime.tags or "").split(",") if t.strip()]
+            studio = anime.studios.split(",")[0].strip() if anime.studios else "Unknown"
 
+            # Use only anime metadata features (no user tolerance to avoid circular dependency)
             row = {
-                "target": target,
-                "episodes": anime.episodes or 0,
-                "average_score": anime.average_score or 0,
-                "popularity": anime.popularity or 0,
+                "anime_id": anime.id,
+                "user_id": rating.user_id,
+                "episodes": float(anime.episodes or 0),
+                "average_score": float(anime.average_score or 0),
+                "popularity": float(anime.popularity or 0),
                 "season": anime.season or "UNKNOWN",
-                "genres": (anime.genres or "").split(","),
-                "tags": (anime.tags or "").split(","),
-                "studios": (anime.studios or "").split(",")[0]
-                if anime.studios
-                else "Unknown",
+                "genres": genres,
+                "tags": tags,
+                "studio": studio,
+                "label": 1 if rating.status == "DROPPED" else 0,
             }
-            data.append(row)
 
-        df = pd.DataFrame(data)
+            rows.append(row)
+
+        df = pd.DataFrame(rows)
+
         if df.empty:
             return df
 
-        # --- Feature Engineering ---
+        # Encode categorical features
+        # Genres (multi-label)
+        genre_lists = df["genres"].tolist()
+        genres_encoded = self.mlb_genres.fit_transform(genre_lists)
+        for i, genre in enumerate(self.mlb_genres.classes_):
+            df[f"Genre_{genre}"] = genres_encoded[:, i]
 
-        # 1. Genres (One-Hot)
-        genres_encoded = self.mlb_genres.fit_transform(df["genres"])
-        genre_df = pd.DataFrame(
-            genres_encoded, columns=[f"Genre_{c}" for c in self.mlb_genres.classes_]
-        )
+        # Tags (multi-label, limit to top 30 most common)
+        tag_lists = df["tags"].tolist()
+        tags_encoded = self.mlb_tags.fit_transform(tag_lists)
+        # Only use tags that exist (up to 30)
+        num_tags = min(len(self.mlb_tags.classes_), 30)
+        for i in range(num_tags):
+            tag = self.mlb_tags.classes_[i]
+            df[f"Tag_{tag}"] = tags_encoded[:, i]
 
-        # 2. Tags (One-Hot) - Limit to top 20 most common tags to avoid explosion
-        # For simplicity in this prototype, we just take all, but in prod limit it.
-        tags_encoded = self.mlb_tags.fit_transform(df["tags"])
-        # Optimization: Select only top 20 tags by frequency
-        tag_counts = df["tags"].explode().value_counts()
-        top_tags = tag_counts.head(20).index.tolist()
+        # Studio (label encoding)
+        df["studio_code"] = self.le_studio.fit_transform(df["studio"])
 
-        # Re-fit only on top tags for cleaner features
-        df["tags_filtered"] = df["tags"].apply(
-            lambda x: [t for t in x if t in top_tags]
-        )
-        tags_encoded = self.mlb_tags.fit_transform(df["tags_filtered"])
+        # Season (one-hot)
+        df = pd.get_dummies(df, columns=["season"], prefix="Season")
 
-        tag_df = pd.DataFrame(
-            tags_encoded, columns=[f"Tag_{c}" for c in self.mlb_tags.classes_]
-        )
+        # Drop original text columns
+        df = df.drop(columns=["genres", "tags", "studio", "anime_id"])
 
-        # 3. Studio (Label Encoding)
-        df["studio_code"] = self.le_studio.fit_transform(df["studios"])
+        return df
 
-        # 4. Season (One-Hot)
-        season_df = pd.get_dummies(df["season"], prefix="Season")
-
-        # Combine all
-        features = pd.concat(
-            [
-                df[["episodes", "average_score", "popularity", "studio_code"]],
-                genre_df,
-                tag_df,
-                season_df,
-            ],
-            axis=1,
-        )
-
-        # Add target back for splitting
-        features["target"] = df["target"]
-
-        return features
-
-    def train_model(self, session: Session) -> Dict[str, Any]:
+    def train_model(self, session: Session, user_id: int = None) -> dict[str, Any]:
         """
-        Fetches data from DB, trains XGBoost model, and returns metrics.
+        Train XGBoost model on user rating data with tolerance-aware features.
+        If user_id is provided, trains only on that user's data (personalized model).
+        Otherwise trains on all users (global model).
         """
-        logger.info("Fetching training data from DB...")
-        ratings = session.exec(select(UserRating)).all()
-        animes = session.exec(select(Anime)).all()
+        logger.info("Starting model training with user tolerance features...")
 
-        if not ratings or not animes:
-            return {"error": "No data available for training"}
+        try:
+            # Prepare features (optionally filtered by user)
+            df = self._prepare_features(session, user_id=user_id)
 
-        logger.info(f"Found {len(ratings)} ratings and {len(animes)} anime.")
+            if df.empty or len(df) < 10:
+                logger.warning("Insufficient data for training")
+                return {
+                    "status": "insufficient_data",
+                    "samples": len(df),
+                    "message": "Need at least 10 samples to train",
+                }
 
-        df = self._prepare_features(ratings, animes)
-        if df.empty:
-            return {"error": "No valid Completed/Dropped entries found"}
+            # Separate features and labels
+            X = df.drop(columns=["label", "user_id"])
+            y = df["label"]
 
-        X = df.drop("target", axis=1)
-        y = df["target"]
+            # Store feature columns for inference
+            self.feature_columns = X.columns.tolist()
 
-        # Check class distribution
-        dropped_count = int(y.sum())
-        completed_count = int(len(y) - dropped_count)
+            # Handle class imbalance
+            n_dropped = sum(y == 1)
+            n_completed = sum(y == 0)
+            scale_pos_weight = n_completed / max(n_dropped, 1)
 
-        if dropped_count < 2 or completed_count < 2:
-            return {
-                "error": f"Insufficient data balance. Dropped: {dropped_count}, Completed: {completed_count}. Need at least 2 of each.",
-                "sample_size": len(df),
-                "dropped_count": dropped_count,
-                "completed_count": completed_count,
-                "top_features": [],
-                "accuracy": 0.0,
+            logger.info(f"Training with {len(X)} samples")
+            logger.info(f"  Dropped: {n_dropped}, Completed: {n_completed}")
+            logger.info(f"  Scale pos weight: {scale_pos_weight:.2f}")
+
+            # Train XGBoost optimized for personalized small datasets
+            self.model = XGBClassifier(
+                n_estimators=200,
+                max_depth=3,
+                learning_rate=0.05,
+                scale_pos_weight=scale_pos_weight,
+                random_state=42,
+                eval_metric="logloss",
+                subsample=0.9,
+                colsample_bytree=0.9,
+                min_child_weight=1,
+                gamma=0.1,
+            )
+            self.model.fit(X, y)
+
+            # Calculate metrics
+            y_pred = self.model.predict(X)
+            accuracy = (y_pred == y).mean()
+
+            # Get feature importances
+            feature_importance = dict(
+                zip(self.feature_columns, self.model.feature_importances_)
+            )
+            top_features = sorted(
+                feature_importance.items(), key=lambda x: x[1], reverse=True
+            )[:10]
+
+            self.is_trained = True
+
+            result = {
+                "accuracy": float(accuracy),
+                "sample_size": len(X),
+                "dropped_count": int(n_dropped),
+                "completed_count": int(n_completed),
+                "top_features": [[str(feat), float(imp)] for feat, imp in top_features],
             }
 
-        # Split Data
-        try:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=y
-            )
-        except ValueError:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
-            )
+            logger.info(f"Model training complete: Accuracy={accuracy:.2%}")
+            return result
 
-        # Train XGBoost
-        logger.info("Training XGBoost model...")
-        self.model = xgb.XGBClassifier(
-            n_estimators=100,
-            learning_rate=0.1,
-            max_depth=5,
-            use_label_encoder=False,
-            eval_metric="logloss",
-        )
-        self.model.fit(X_train, y_train)
+        except Exception as e:
+            logger.error(f"Error training model: {e}", exc_info=True)
+            return {
+                "accuracy": 0.0,
+                "sample_size": 0,
+                "dropped_count": 0,
+                "completed_count": 0,
+                "top_features": [],
+                "error": str(e),
+            }
 
-        # Evaluate
-        accuracy = self.model.score(X_test, y_test)
-        logger.info(f"Model trained. Accuracy: {accuracy:.2f}")
-
-        self.is_trained = True
-
-        # Feature Importance
-        importance = dict(zip(X.columns, self.model.feature_importances_))
-        top_features = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10]
-
-        # Convert numpy types to native Python types for JSON serialization
-        top_features_serializable = [
-            (str(name), float(val)) for name, val in top_features
-        ]
-
-        return {
-            "accuracy": float(accuracy),
-            "sample_size": int(len(df)),
-            "dropped_count": int(y.sum()),
-            "completed_count": int(len(y) - y.sum()),
-            "top_features": top_features_serializable,
-        }
-
-        # Store feature columns for later prediction
-        self.feature_columns = X.columns.tolist()
-
-    def predict_drop_probability(self, anime: Anime) -> float:
+    def predict_drop_probability(
+        self, anime: Anime, user_id: int, session: Session
+    ) -> tuple[float, list[str]]:
         """
-        Predicts drop probability for a single anime.
-        Returns probability between 0.0 and 1.0.
+        Predict drop probability for a given anime and user.
+        Uses trained model with user tolerance features.
         """
         if not self.is_trained or not self.model or not self.feature_columns:
-            logger.warning("Model not trained yet.")
-            return 0.0
+            logger.warning("Model not trained yet")
+            return 0.0, ["Model not trained"]
 
         try:
-            # Prepare features similar to training
-            genres = (anime.genres or "").split(",")
-            tags = (anime.tags or "").split(",")
-            studios = (
-                (anime.studios or "").split(",")[0] if anime.studios else "Unknown"
-            )
+            from sqlmodel import select
 
-            # Create a single row dataframe
+            # Parse anime metadata
+            genres = [g.strip() for g in (anime.genres or "").split(",") if g.strip()]
+            tags = [t.strip() for t in (anime.tags or "").split(",") if t.strip()]
+            studio = anime.studios.split(",")[0].strip() if anime.studios else "Unknown"
+
+            # Calculate user's historical statistics for context
+            user_ratings = session.exec(
+                select(UserRating).where(UserRating.user_id == user_id)
+            ).all()
+
+            # Studio stats
+            studio_total = 0
+            studio_dropped = 0
+            for rating in user_ratings:
+                r_anime = session.get(Anime, rating.anime_id)
+                if r_anime and r_anime.studios:
+                    r_studio = r_anime.studios.split(",")[0].strip()
+                    if r_studio == studio:
+                        studio_total += 1
+                        if rating.status == "DROPPED":
+                            studio_dropped += 1
+
+            # Genre stats
+            genre_stats = {}
+            for genre in genres:
+                g_total = 0
+                g_dropped = 0
+                for rating in user_ratings:
+                    r_anime = session.get(Anime, rating.anime_id)
+                    if r_anime and r_anime.genres and genre in r_anime.genres:
+                        g_total += 1
+                        if rating.status == "DROPPED":
+                            g_dropped += 1
+                if g_total >= 2:
+                    genre_stats[genre] = (g_dropped, g_total)
+
+            # Find similar dropped anime
+            similar_dropped = []
+            for rating in user_ratings:
+                if rating.status != "DROPPED":
+                    continue
+                r_anime = session.get(Anime, rating.anime_id)
+                if not r_anime:
+                    continue
+
+                r_genres = set((r_anime.genres or "").split(","))
+                r_studio = (
+                    r_anime.studios.split(",")[0].strip() if r_anime.studios else ""
+                )
+
+                common_genres = set(genres) & r_genres
+                same_studio = studio == r_studio and studio != "Unknown"
+
+                if len(common_genres) >= 2 or same_studio:
+                    similar_dropped.append(
+                        (r_anime.title_romaji, len(common_genres), same_studio)
+                    )
+
+            # Build feature vector from anime metadata only
             row_data = {
-                "episodes": anime.episodes or 0,
-                "average_score": anime.average_score or 0,
-                "popularity": anime.popularity or 0,
-                "season": anime.season or "UNKNOWN",
+                "episodes": float(anime.episodes or 0),
+                "average_score": float(anime.average_score or 0),
+                "popularity": float(anime.popularity or 0),
             }
 
             # Encode genres
-            genres_encoded = self.mlb_genres.transform([genres])
+            genres_for_encoding = [g for g in genres if g in self.mlb_genres.classes_]
+            genres_encoded = self.mlb_genres.transform([genres_for_encoding])
             for i, genre in enumerate(self.mlb_genres.classes_):
-                row_data[f"Genre_{genre}"] = genres_encoded[0][i]
+                row_data[f"Genre_{genre}"] = int(genres_encoded[0][i])
 
             # Encode tags
-            tags_encoded = self.mlb_tags.transform([tags])
-            for i, tag in enumerate(self.mlb_tags.classes_):
-                row_data[f"Tag_{tag}"] = tags_encoded[0][i]
+            tags_for_encoding = [t for t in tags if t in self.mlb_tags.classes_]
+            tags_encoded = self.mlb_tags.transform([tags_for_encoding])
+            # Only use tags that exist (up to 30)
+            num_tags = min(len(self.mlb_tags.classes_), 30)
+            for i in range(num_tags):
+                tag = self.mlb_tags.classes_[i]
+                row_data[f"Tag_{tag}"] = int(tags_encoded[0][i])
 
             # Encode studio
             try:
-                studio_code = self.le_studio.transform([studios])[0]
+                studio_code = int(self.le_studio.transform([studio])[0])
             except ValueError:
-                # Unknown studio, use -1 or mean
-                studio_code = -1
+                studio_code = 0
             row_data["studio_code"] = studio_code
 
             # Season one-hot
+            current_season = anime.season or "UNKNOWN"
             for season in ["WINTER", "SPRING", "SUMMER", "FALL", "UNKNOWN"]:
-                row_data[f"Season_{season}"] = 1 if anime.season == season else 0
+                row_data[f"Season_{season}"] = 1 if current_season == season else 0
 
-            # Create dataframe with only the features that exist in training
+            # Create dataframe
             df = pd.DataFrame([row_data])
 
-            # Add missing columns with 0
+            # Add missing columns
             for col in self.feature_columns:
                 if col not in df.columns:
                     df[col] = 0
 
-            # Ensure same column order as training
+            # Ensure same column order
             df = df[self.feature_columns]
 
-            # Predict probability of dropping (class 1)
-            proba = self.model.predict_proba(df)[0][1]
-            return float(proba)
+            # Predict
+            proba = float(self.model.predict_proba(df)[0][1])
+
+            # Build detailed explanation
+            reasons = []
+
+            # Risk level description
+            if proba >= 0.7:
+                reasons.append(f"⚠️ 高風險 {proba:.1%} - 根據你的觀看歷史，很可能棄番")
+            elif proba >= 0.4:
+                reasons.append(f"⚡ 中風險 {proba:.1%} - 建議謹慎考慮")
+            elif proba >= 0.2:
+                reasons.append(f"📊 低-中風險 {proba:.1%} - 有一定風險但可嘗試")
+            else:
+                reasons.append(f"✅ 低風險 {proba:.1%} - 符合你的口味")
+
+            # Studio history
+            if studio_total > 0:
+                studio_rate = studio_dropped / studio_total
+                if studio_rate >= 0.3:
+                    reasons.append(
+                        f"🏢 你對 {studio} 的棄番率: {studio_rate:.0%} ({studio_dropped}/{studio_total}部)"
+                    )
+                elif studio_total >= 3:
+                    reasons.append(
+                        f"🏢 你看過 {studio} 的 {studio_total} 部作品，棄了 {studio_dropped} 部"
+                    )
+
+            # Genre history (only show risky ones)
+            risky_genres = [
+                (g, d, t) for g, (d, t) in genre_stats.items() if d / t >= 0.15
+            ]
+            if risky_genres:
+                risky_genres.sort(key=lambda x: x[1] / x[2], reverse=True)
+                g, d, t = risky_genres[0]
+                reasons.append(f"🎭 你對 {g} 類型的棄番率: {d / t:.0%} ({d}/{t}部)")
+
+            # Similar dropped anime
+            if similar_dropped:
+                similar_dropped.sort(key=lambda x: (x[2], x[1]), reverse=True)
+                top_sim = similar_dropped[0]
+                if top_sim[2]:  # same studio
+                    reasons.append(f"⚡ 與你棄番的《{top_sim[0]}》同公司同類型")
+                elif top_sim[1] >= 3:
+                    reasons.append(
+                        f"📌 與你棄番的《{top_sim[0]}》有 {top_sim[1]} 個相同類型"
+                    )
+
+            # If low risk, explain why
+            if proba < 0.2 and not risky_genres and studio_dropped == 0:
+                reasons.append(f"✨ 這類型動畫你通常都會看完")
+
+            # Basic info
+            reasons.append(
+                f"📺 {', '.join(genres[:3])} | {anime.episodes or '?'} 集 | {studio}"
+            )
+
+            logger.debug(
+                f"Predicted {proba:.2%} drop probability for {anime.title_romaji}"
+            )
+
+            return proba, reasons
 
         except Exception as e:
-            logger.error(f"Error predicting drop probability: {e}")
-            return 0.0
+            logger.error(
+                f"Error predicting for {anime.title_romaji}: {e}", exc_info=True
+            )
+            return 0.0, [f"Prediction error: {str(e)}"]
 
     def analyze_drop_patterns(
-        self, ratings: List[UserRating], animes: List[Anime]
-    ) -> Dict[str, Any]:
+        self, ratings: list[UserRating], animes: list[Anime]
+    ) -> dict[str, Any]:
         """
-        Analyzes patterns in dropped anime to find common factors.
-        Returns statistics by tags, studios, and genres.
+        Analyze overall drop patterns across all users.
         """
         anime_map = {a.id: a for a in animes}
 
-        dropped_anime = []
-        completed_anime = []
+        tag_stats = {}
+        genre_stats = {}
+        studio_stats = {}
 
-        for r in ratings:
-            anime = anime_map.get(r.anime_id)
+        for rating in ratings:
+            anime = anime_map.get(rating.anime_id)
             if not anime:
                 continue
 
-            if r.status == "DROPPED":
-                dropped_anime.append(anime)
-            elif r.status == "COMPLETED":
-                completed_anime.append(anime)
+            is_dropped = rating.status == "DROPPED"
 
-        # Analyze tags
-        dropped_tags = []
-        completed_tags = []
-        for anime in dropped_anime:
-            if anime.tags:
-                dropped_tags.extend(anime.tags.split(","))
-        for anime in completed_anime:
-            if anime.tags:
-                completed_tags.extend(anime.tags.split(","))
-
-        # Analyze genres
-        dropped_genres = []
-        completed_genres = []
-        for anime in dropped_anime:
+            # Analyze genres
             if anime.genres:
-                dropped_genres.extend(anime.genres.split(","))
-        for anime in completed_anime:
-            if anime.genres:
-                completed_genres.extend(anime.genres.split(","))
+                genres = [g.strip() for g in anime.genres.split(",") if g.strip()]
+                for genre in genres:
+                    if genre not in genre_stats:
+                        genre_stats[genre] = {"total": 0, "dropped": 0}
+                    genre_stats[genre]["total"] += 1
+                    if is_dropped:
+                        genre_stats[genre]["dropped"] += 1
 
-        # Analyze studios
-        dropped_studios = []
-        completed_studios = []
-        for anime in dropped_anime:
+            # Analyze tags
+            if anime.tags:
+                tags = [t.strip() for t in anime.tags.split(",") if t.strip()]
+                for tag in tags[:10]:
+                    if tag not in tag_stats:
+                        tag_stats[tag] = {"total": 0, "dropped": 0}
+                    tag_stats[tag]["total"] += 1
+                    if is_dropped:
+                        tag_stats[tag]["dropped"] += 1
+
+            # Analyze studios
             if anime.studios:
-                dropped_studios.extend(anime.studios.split(","))
-        for anime in completed_anime:
-            if anime.studios:
-                completed_studios.extend(anime.studios.split(","))
+                studio = anime.studios.split(",")[0].strip()
+                if studio not in studio_stats:
+                    studio_stats[studio] = {"total": 0, "dropped": 0}
+                studio_stats[studio]["total"] += 1
+                if is_dropped:
+                    studio_stats[studio]["dropped"] += 1
 
-        # Calculate drop rates
-        def calculate_drop_rate(item, dropped_list, completed_list):
-            dropped_count = dropped_list.count(item)
-            completed_count = completed_list.count(item)
-            total = dropped_count + completed_count
-            if total == 0:
-                return 0.0
-            return dropped_count / total
-
-        # Top dropped tags
-        all_tags = set(dropped_tags + completed_tags)
-        tag_stats = []
-        for tag in all_tags:
-            if not tag.strip():
-                continue
-            dropped_count = dropped_tags.count(tag)
-            completed_count = completed_tags.count(tag)
-            total = dropped_count + completed_count
-            if total >= 2:  # At least 2 occurrences
-                drop_rate = dropped_count / total
-                tag_stats.append(
-                    {
-                        "name": tag,
-                        "dropped": dropped_count,
-                        "completed": completed_count,
-                        "total": total,
-                        "drop_rate": drop_rate,
-                    }
-                )
-        tag_stats.sort(key=lambda x: (x["drop_rate"], x["total"]), reverse=True)
-
-        # Top dropped genres
-        all_genres = set(dropped_genres + completed_genres)
-        genre_stats = []
-        for genre in all_genres:
-            if not genre.strip():
-                continue
-            dropped_count = dropped_genres.count(genre)
-            completed_count = completed_genres.count(genre)
-            total = dropped_count + completed_count
-            if total >= 2:
-                drop_rate = dropped_count / total
-                genre_stats.append(
-                    {
-                        "name": genre,
-                        "dropped": dropped_count,
-                        "completed": completed_count,
-                        "total": total,
-                        "drop_rate": drop_rate,
-                    }
-                )
-        genre_stats.sort(key=lambda x: (x["drop_rate"], x["total"]), reverse=True)
-
-        # Top dropped studios
-        all_studios = set(dropped_studios + completed_studios)
-        studio_stats = []
-        for studio in all_studios:
-            if not studio.strip():
-                continue
-            dropped_count = dropped_studios.count(studio)
-            completed_count = completed_studios.count(studio)
-            total = dropped_count + completed_count
-            if total >= 2:
-                drop_rate = dropped_count / total
-                studio_stats.append(
-                    {
-                        "name": studio,
-                        "dropped": dropped_count,
-                        "completed": completed_count,
-                        "total": total,
-                        "drop_rate": drop_rate,
-                    }
-                )
-        studio_stats.sort(key=lambda x: (x["drop_rate"], x["total"]), reverse=True)
+        # Calculate drop rates and sort
+        def calculate_drop_rate(stats: dict, min_samples: int = 3) -> list[dict]:
+            results = []
+            for name, data in stats.items():
+                if data["total"] >= min_samples:
+                    drop_rate = data["dropped"] / data["total"]
+                    results.append(
+                        {
+                            "name": name,
+                            "drop_rate": float(drop_rate),
+                            "total": data["total"],
+                            "dropped": data["dropped"],
+                        }
+                    )
+            return sorted(results, key=lambda x: x["drop_rate"], reverse=True)[:10]
 
         return {
-            "top_dropped_tags": tag_stats[:10],
-            "top_dropped_genres": genre_stats[:10],
-            "top_dropped_studios": studio_stats[:10],
+            "top_dropped_genres": calculate_drop_rate(genre_stats),
+            "top_dropped_tags": calculate_drop_rate(tag_stats),
+            "top_dropped_studios": calculate_drop_rate(studio_stats),
         }

@@ -122,14 +122,20 @@ async def fetch_and_store_user_data(session: Session, username: str):
                 # Commit immediately to satisfy foreign key constraint for rating
                 session.commit()
 
-            # Check if rating exists
-            # In a real app, we might want to update existing ratings
+            # Check if rating exists and update or create
             statement = select(UserRating).where(
                 UserRating.user_id == user.id, UserRating.anime_id == anime_id
             )
             existing_rating = session.exec(statement).first()
 
-            if not existing_rating:
+            if existing_rating:
+                # Update existing rating with latest data
+                existing_rating.score = entry.get("score", 0)
+                existing_rating.status = entry.get("status", "UNKNOWN")
+                existing_rating.progress = entry.get("progress", 0)
+                session.add(existing_rating)
+            else:
+                # Create new rating
                 rating = UserRating(
                     user_id=user.id,
                     anime_id=anime_id,
@@ -144,7 +150,10 @@ async def fetch_and_store_user_data(session: Session, username: str):
             continue
 
     session.commit()
-    logger.info(f"Stored {new_ratings_count} new ratings for {username}.")
+    logger.info(
+        f"Updated {username}'s list: {new_ratings_count} new ratings, "
+        f"{len(entries) - new_ratings_count} updated ratings."
+    )
 
 
 async def main():
