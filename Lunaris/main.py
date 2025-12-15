@@ -823,17 +823,25 @@ async def get_user_recap(request: RecapRequest):
     If year is None, returns all-time recap.
     """
     try:
+        print("\n" + "=" * 60)
+        print(f"📊 開始生成 Recap: {request.username}")
+        print(f"年份: {request.year if request.year else '全部'}")
+        print("=" * 60)
         logger.info(f"Generating recap for {request.username}, year={request.year}")
 
         # Fetch user's complete anime list
+        print("🔄 正在抓取使用者動漫列表...")
         user_list = await anilist_client.get_user_anime_list(request.username)
+        print(f"✅ 成功抓取 {len(user_list) if user_list else 0} 筆資料")
 
         if not user_list:
+            print("❌ 錯誤: 找不到使用者或動漫列表為空")
             raise HTTPException(
                 status_code=404, detail="User not found or has no anime list"
             )
 
         # Filter by year if specified
+        print(f"🔍 開始篩選資料 (年份: {request.year if request.year else '全部'})...")
         filtered_list = []
         for entry in user_list:
             if request.year is not None:
@@ -852,7 +860,10 @@ async def get_user_recap(request: RecapRequest):
                 # All-time recap - include all entries
                 filtered_list.append(entry)
 
+        print(f"✅ 篩選完成，共 {len(filtered_list)} 筆符合條件的資料")
+
         if not filtered_list:
+            print("⚠️  警告: 篩選後無資料，返回空結果")
             return {
                 "username": request.username,
                 "year": request.year,
@@ -887,7 +898,17 @@ async def get_user_recap(request: RecapRequest):
 
         genre_count = {}
         format_count = {}
+        tag_count = {}
+        studio_count = {}
+        studio_details = {}  # Store studio info with images
+        voice_actor_count = {}
+        voice_actor_details = {}  # Store VA info with images
+        anime_ids_for_va = []  # Collect anime IDs for separate VA queries
+        season_count = {}
+        month_added_count = {}
+        month_completed_count = {}
         scores = []
+        repeat_anime = []
 
         # For top anime (sorted by score and episodes watched)
         scored_anime = []
@@ -951,87 +972,567 @@ async def get_user_recap(request: RecapRequest):
             format_type = media.get("format", "UNKNOWN")
             format_count[format_type] = format_count.get(format_type, 0) + 1
 
+            # Count tags (top 20)
+            for tag in media.get("tags", []):
+                tag_name = tag.get("name") if isinstance(tag, dict) else tag
+                if tag_name:
+                    tag_count[tag_name] = tag_count.get(tag_name, 0) + 1
+
+            # Count studios with details
+            studios = media.get("studios", {})
+            if isinstance(studios, dict):
+                studio_nodes = studios.get("nodes", [])
+            else:
+                studio_nodes = studios if isinstance(studios, list) else []
+
+            for studio in studio_nodes:
+                if isinstance(studio, dict):
+                    studio_name = studio.get("name")
+                    if studio_name:
+                        studio_count[studio_name] = studio_count.get(studio_name, 0) + 1
+                        # Store studio details (first occurrence)
+                        if studio_name not in studio_details:
+                            studio_details[studio_name] = {
+                                "id": studio.get("id"),
+                                "name": studio_name,
+                                "siteUrl": studio.get("siteUrl"),
+                                "count": 0,
+                            }
+                        studio_details[studio_name]["count"] = studio_count[studio_name]
+                else:
+                    studio_name = studio
+                    if studio_name:
+                        studio_count[studio_name] = studio_count.get(studio_name, 0) + 1
+
+            # Note: Voice actor data will be fetched separately after initial processing
+
+            # Collect anime IDs for voice actor fetching
+            anime_ids_for_va.append(media.get("id"))
+
+            # Count seasons
+            season = media.get("season")
+            season_year = media.get("seasonYear")
+            if season and season_year:
+                season_key = f"{season_year} {season}"
+                season_count[season_key] = season_count.get(season_key, 0) + 1
+
+            # Count months (when added/completed)
+            started_at = entry.get("startedAt", {})
+            completed_at = entry.get("completedAt", {})
+
+            if started_at and started_at.get("year") and started_at.get("month"):
+                month_key = f"{started_at['year']}-{started_at['month']:02d}"
+                month_added_count[month_key] = month_added_count.get(month_key, 0) + 1
+
+            if completed_at and completed_at.get("year") and completed_at.get("month"):
+                month_key = f"{completed_at['year']}-{completed_at['month']:02d}"
+                month_completed_count[month_key] = (
+                    month_completed_count.get(month_key, 0) + 1
+                )
+
+            # Track repeat counts
+            repeat_count = entry.get("repeat", 0)
+            if repeat_count > 0:
+                repeat_anime.append(
+                    {
+                        "id": media.get("id"),
+                        "title": media.get("title", {}).get("romaji", "Unknown"),
+                        "title_english": media.get("title", {}).get("english"),
+                        "coverImage": media.get("coverImage", {}).get("large", ""),
+                        "repeat_count": repeat_count,
+                        "score": score,
+                    }
+                )
+
         # Calculate top anime (by user score, then by episodes)
         scored_anime.sort(key=lambda x: (x["score"], x["episodes"]), reverse=True)
         top_anime = scored_anime[:10]
 
+        # Sort repeat anime
+        repeat_anime.sort(key=lambda x: x["repeat_count"], reverse=True)
+
         # Calculate average score
         average_score = sum(scores) / len(scores) if scores else 0
 
-        # Calculate achievements
-        achievements = []
+        # Fetch voice actor data separately with parallel processing
+        print(f"\n🎤 開始抓取聲優數據...")
+        print(f"  - 需要查詢的動漫數量: {len(anime_ids_for_va)}")
 
-        if completed_count >= 100:
+        # Use semaphore to limit concurrent requests (max 5 at a time)
+        semaphore = asyncio.Semaphore(5)
+
+        async def fetch_va_with_semaphore(anime_id, idx):
+            async with semaphore:
+                try:
+                    # Small delay to respect rate limits
+                    await asyncio.sleep(0.15)
+
+                    if idx % 20 == 0:
+                        print(f"  - 進度: {idx}/{len(anime_ids_for_va)}")
+
+                    anime_va_data = await anilist_client.get_anime_voice_actors(
+                        anime_id
+                    )
+                    return (anime_id, anime_va_data)
+                except Exception as e:
+                    print(f"  ⚠️ 抓取動漫 {anime_id} 聲優數據失敗: {str(e)}")
+                    return (anime_id, None)
+
+        # Fetch all voice actor data in parallel with controlled concurrency
+        tasks = [
+            fetch_va_with_semaphore(anime_id, idx)
+            for idx, anime_id in enumerate(anime_ids_for_va)
+        ]
+        results = await asyncio.gather(*tasks)
+
+        # Process results
+        for anime_id, anime_va_data in results:
+            if anime_va_data and "characters" in anime_va_data:
+                characters = anime_va_data["characters"]
+                if characters and isinstance(characters, dict):
+                    edges = characters.get("edges", [])
+
+                    # 先收集本部作品所有聲優的 set
+                    unique_va_names = set()
+                    va_details_map = {}
+                    for edge in edges:
+                        if isinstance(edge, dict):
+                            voice_actors = edge.get("voiceActors", [])
+                            if voice_actors and isinstance(voice_actors, list):
+                                for va in voice_actors:
+                                    if isinstance(va, dict):
+                                        va_name = va.get("name")
+                                        if va_name and isinstance(va_name, dict):
+                                            va_full_name = va_name.get("full")
+                                            if va_full_name:
+                                                unique_va_names.add(va_full_name)
+                                                # 儲存詳細資料（只存一次）
+                                                if va_full_name not in va_details_map:
+                                                    va_image = va.get("image", {})
+                                                    if isinstance(va_image, dict):
+                                                        va_image_url = va_image.get(
+                                                            "large"
+                                                        ) or va_image.get("medium")
+                                                    else:
+                                                        va_image_url = None
+                                                    va_details_map[va_full_name] = {
+                                                        "id": va.get("id"),
+                                                        "name": va_full_name,
+                                                        "native": va_name.get("native"),
+                                                        "image": va_image_url,
+                                                        "siteUrl": va.get("siteUrl"),
+                                                        "count": 0,
+                                                    }
+                    # 統一+1
+                    for va_full_name in unique_va_names:
+                        voice_actor_count[va_full_name] = (
+                            voice_actor_count.get(va_full_name, 0) + 1
+                        )
+                        # Store VA details
+                        if va_full_name not in voice_actor_details:
+                            voice_actor_details[va_full_name] = va_details_map[va_full_name]
+                        voice_actor_details[va_full_name]["count"] = voice_actor_count[va_full_name]
+
+        print(f"✅ 聲優數據抓取完成!")
+        print(f"  - 找到的聲優總數: {len(voice_actor_count)}")
+
+        print(f"\n📈 統計完成:")
+        print(f"  - 總動漫數: {total_anime}")
+        print(f"  - 總集數: {total_episodes}")
+        print(f"  - 總時長: {round(total_minutes / 60, 1)} 小時")
+        print(f"  - 完成數: {completed_count}")
+        print(f"  - 平均評分: {round(average_score, 1)}")
+        print(f"  - 製作公司數: {len(studio_count)}")
+        print(f"  - 聲優數: {len(voice_actor_count)}")
+
+        # Sort additional statistics
+        top_tags = dict(
+            sorted(tag_count.items(), key=lambda x: x[1], reverse=True)[:20]
+        )
+
+        # Top studios with details
+        top_studios_list = sorted(
+            studio_details.values(), key=lambda x: x["count"], reverse=True
+        )[:10]
+        top_studios = {s["name"]: s for s in top_studios_list}
+
+        # Top voice actors with details
+        top_voice_actors_list = sorted(
+            voice_actor_details.values(), key=lambda x: x["count"], reverse=True
+        )[:20]
+        top_voice_actors = {va["name"]: va for va in top_voice_actors_list}
+
+        top_seasons = dict(
+            sorted(season_count.items(), key=lambda x: x[1], reverse=True)[:10]
+        )
+
+        # Monthly representative anime (for year mode)
+        monthly_representative = {}
+        if request.year is not None:
+            for entry in filtered_list:
+                completed_at = entry.get("completedAt", {})
+                if (
+                    completed_at
+                    and completed_at.get("year") == request.year
+                    and completed_at.get("month")
+                ):
+                    month = completed_at["month"]
+                    score = entry.get("score", 0)
+                    media = entry.get("media", {})
+
+                    if score > 0:
+                        if (
+                            month not in monthly_representative
+                            or score > monthly_representative[month]["score"]
+                        ):
+                            monthly_representative[month] = {
+                                "month": month,
+                                "id": media.get("id"),
+                                "title": media.get("title", {}).get(
+                                    "romaji", "Unknown"
+                                ),
+                                "title_english": media.get("title", {}).get("english"),
+                                "coverImage": media.get("coverImage", {}).get(
+                                    "large", ""
+                                ),
+                                "score": score,
+                            }
+
+        # Calculate achievements with tiers
+        print("🏆 計算成就...")
+        achievements = []
+        total_hours = total_minutes / 60
+
+        # Achievement: Anime Count (Bronze/Silver/Gold/Diamond)
+        if completed_count >= 1000:
             achievements.append(
                 {
-                    "id": "century_club",
-                    "title": "百番達成！",
+                    "id": "anime_collector_diamond",
+                    "title": "鑽石收藏家",
                     "description": f"完成了 {completed_count} 部動漫",
-                    "icon": "🏆",
+                    "icon": "💎",
+                    "tier": "diamond",
+                }
+            )
+        elif completed_count >= 500:
+            achievements.append(
+                {
+                    "id": "anime_collector_gold",
+                    "title": "黃金收藏家",
+                    "description": f"完成了 {completed_count} 部動漫",
+                    "icon": "🥇",
+                    "tier": "gold",
+                }
+            )
+        elif completed_count >= 100:
+            achievements.append(
+                {
+                    "id": "anime_collector_silver",
+                    "title": "白銀收藏家",
+                    "description": f"完成了 {completed_count} 部動漫",
+                    "icon": "🥈",
+                    "tier": "silver",
                 }
             )
         elif completed_count >= 50:
             achievements.append(
                 {
-                    "id": "half_century",
-                    "title": "五十番達成！",
+                    "id": "anime_collector_bronze",
+                    "title": "青銅收藏家",
                     "description": f"完成了 {completed_count} 部動漫",
-                    "icon": "⭐",
+                    "icon": "🥉",
+                    "tier": "bronze",
                 }
             )
 
-        if total_episodes >= 1000:
+        # Achievement: Episodes Watched
+        if total_episodes >= 10000:
             achievements.append(
                 {
-                    "id": "episode_master",
+                    "id": "episode_legend",
+                    "title": "集數傳說",
+                    "description": f"觀看了 {total_episodes} 集動漫",
+                    "icon": "💎",
+                    "tier": "diamond",
+                }
+            )
+        elif total_episodes >= 5000:
+            achievements.append(
+                {
+                    "id": "episode_master_gold",
+                    "title": "集數宗師",
+                    "description": f"觀看了 {total_episodes} 集動漫",
+                    "icon": "🥇",
+                    "tier": "gold",
+                }
+            )
+        elif total_episodes >= 2000:
+            achievements.append(
+                {
+                    "id": "episode_master_silver",
                     "title": "集數大師",
                     "description": f"觀看了 {total_episodes} 集動漫",
-                    "icon": "📺",
+                    "icon": "🥈",
+                    "tier": "silver",
+                }
+            )
+        elif total_episodes >= 1000:
+            achievements.append(
+                {
+                    "id": "episode_master_bronze",
+                    "title": "集數達人",
+                    "description": f"觀看了 {total_episodes} 集動漫",
+                    "icon": "🥉",
+                    "tier": "bronze",
                 }
             )
 
-        total_hours = total_minutes / 60
-        if total_hours >= 100:
+        # Achievement: Time Spent
+        if total_hours >= 1000:
             achievements.append(
                 {
-                    "id": "time_traveler",
+                    "id": "time_lord",
+                    "title": "時空領主",
+                    "description": f"花了 {total_hours:.0f} 小時在動漫上",
+                    "icon": "💎",
+                    "tier": "diamond",
+                }
+            )
+        elif total_hours >= 500:
+            achievements.append(
+                {
+                    "id": "time_traveler_gold",
+                    "title": "時空旅者",
+                    "description": f"花了 {total_hours:.0f} 小時在動漫上",
+                    "icon": "🥇",
+                    "tier": "gold",
+                }
+            )
+        elif total_hours >= 300:
+            achievements.append(
+                {
+                    "id": "time_traveler_silver",
                     "title": "時間旅行者",
                     "description": f"花了 {total_hours:.0f} 小時在動漫上",
-                    "icon": "⏰",
+                    "icon": "🥈",
+                    "tier": "silver",
+                }
+            )
+        elif total_hours >= 100:
+            achievements.append(
+                {
+                    "id": "time_traveler_bronze",
+                    "title": "時光探索者",
+                    "description": f"花了 {total_hours:.0f} 小時在動漫上",
+                    "icon": "🥉",
+                    "tier": "bronze",
                 }
             )
 
-        if average_score >= 80:
+        # Achievement: High Score Average
+        if average_score >= 85:
             achievements.append(
                 {
-                    "id": "generous_critic",
+                    "id": "generous_critic_gold",
                     "title": "慷慨的評論家",
                     "description": f"平均評分 {average_score:.1f}",
-                    "icon": "💯",
+                    "icon": "🥇",
+                    "tier": "gold",
+                }
+            )
+        elif average_score >= 80:
+            achievements.append(
+                {
+                    "id": "generous_critic_silver",
+                    "title": "友善的評論家",
+                    "description": f"平均評分 {average_score:.1f}",
+                    "icon": "🥈",
+                    "tier": "silver",
+                }
+            )
+        elif average_score >= 75:
+            achievements.append(
+                {
+                    "id": "generous_critic_bronze",
+                    "title": "溫和的評論家",
+                    "description": f"平均評分 {average_score:.1f}",
+                    "icon": "🥉",
+                    "tier": "bronze",
                 }
             )
 
-        # Find most watched genre
+        # Achievement: Genre Expert
         if genre_count:
             top_genre = max(genre_count, key=genre_count.get)
+            genre_total = genre_count[top_genre]
+            if genre_total >= 100:
+                achievements.append(
+                    {
+                        "id": "genre_master",
+                        "title": f"{top_genre} 宗師",
+                        "description": f"觀看了 {genre_total} 部 {top_genre} 動漫",
+                        "icon": "🎭",
+                        "tier": "gold",
+                    }
+                )
+            elif genre_total >= 50:
+                achievements.append(
+                    {
+                        "id": "genre_expert",
+                        "title": f"{top_genre} 專家",
+                        "description": f"觀看了 {genre_total} 部 {top_genre} 動漫",
+                        "icon": "🎭",
+                        "tier": "silver",
+                    }
+                )
+            elif genre_total >= 20:
+                achievements.append(
+                    {
+                        "id": "genre_fan",
+                        "title": f"{top_genre} 愛好者",
+                        "description": f"觀看了 {genre_total} 部 {top_genre} 動漫",
+                        "icon": "🎭",
+                        "tier": "bronze",
+                    }
+                )
+
+        # Achievement: Perfect Record
+        if dropped_count == 0 and completed_count >= 100:
             achievements.append(
                 {
-                    "id": "genre_expert",
-                    "title": f"{top_genre} 專家",
-                    "description": f"觀看了 {genre_count[top_genre]} 部 {top_genre} 動漫",
-                    "icon": "🎭",
+                    "id": "never_give_up_gold",
+                    "title": "永不放棄！",
+                    "description": f"完成 {completed_count} 部，零棄番！",
+                    "icon": "💪",
+                    "tier": "gold",
+                }
+            )
+        elif dropped_count == 0 and completed_count >= 50:
+            achievements.append(
+                {
+                    "id": "never_give_up_silver",
+                    "title": "堅持到底",
+                    "description": f"完成 {completed_count} 部，零棄番！",
+                    "icon": "💪",
+                    "tier": "silver",
+                }
+            )
+        elif dropped_count == 0 and completed_count >= 20:
+            achievements.append(
+                {
+                    "id": "never_give_up_bronze",
+                    "title": "不輕言放棄",
+                    "description": f"完成 {completed_count} 部，零棄番！",
+                    "icon": "💪",
+                    "tier": "bronze",
                 }
             )
 
-        if dropped_count == 0 and completed_count > 10:
+        # Achievement: Rewatcher
+        if repeat_anime:
+            max_repeat = max(a["repeat_count"] for a in repeat_anime)
+            if max_repeat >= 5:
+                achievements.append(
+                    {
+                        "id": "rewatcher_gold",
+                        "title": "重溫大師",
+                        "description": f"最多重看了 {max_repeat} 次",
+                        "icon": "🔄",
+                        "tier": "gold",
+                    }
+                )
+            elif max_repeat >= 3:
+                achievements.append(
+                    {
+                        "id": "rewatcher_silver",
+                        "title": "重溫愛好者",
+                        "description": f"最多重看了 {max_repeat} 次",
+                        "icon": "🔄",
+                        "tier": "silver",
+                    }
+                )
+            elif max_repeat >= 2:
+                achievements.append(
+                    {
+                        "id": "rewatcher_bronze",
+                        "title": "二刷達成",
+                        "description": f"重看了動漫 {max_repeat} 次",
+                        "icon": "🔄",
+                        "tier": "bronze",
+                    }
+                )
+
+        # Achievement: Diverse Taste
+        unique_genres = len(genre_count)
+        if unique_genres >= 20:
             achievements.append(
                 {
-                    "id": "never_give_up",
-                    "title": "永不放棄",
-                    "description": "沒有棄番記錄！",
-                    "icon": "💪",
+                    "id": "diverse_taste_gold",
+                    "title": "全方位愛好者",
+                    "description": f"涉獵了 {unique_genres} 種類型",
+                    "icon": "🌈",
+                    "tier": "gold",
                 }
             )
+        elif unique_genres >= 15:
+            achievements.append(
+                {
+                    "id": "diverse_taste_silver",
+                    "title": "多元品味",
+                    "description": f"涉獵了 {unique_genres} 種類型",
+                    "icon": "🌈",
+                    "tier": "silver",
+                }
+            )
+        elif unique_genres >= 10:
+            achievements.append(
+                {
+                    "id": "diverse_taste_bronze",
+                    "title": "廣泛興趣",
+                    "description": f"涉獵了 {unique_genres} 種類型",
+                    "icon": "🌈",
+                    "tier": "bronze",
+                }
+            )
+
+        # Achievement: Seasonal Binger
+        if season_count:
+            max_season = max(season_count.values())
+            if max_season >= 30:
+                achievements.append(
+                    {
+                        "id": "seasonal_champion",
+                        "title": "追番冠軍",
+                        "description": f"單季看了 {max_season} 部動漫",
+                        "icon": "📅",
+                        "tier": "gold",
+                    }
+                )
+            elif max_season >= 20:
+                achievements.append(
+                    {
+                        "id": "seasonal_enthusiast",
+                        "title": "追番達人",
+                        "description": f"單季看了 {max_season} 部動漫",
+                        "icon": "📅",
+                        "tier": "silver",
+                    }
+                )
+            elif max_season >= 10:
+                achievements.append(
+                    {
+                        "id": "seasonal_fan",
+                        "title": "追番愛好者",
+                        "description": f"單季看了 {max_season} 部動漫",
+                        "icon": "📅",
+                        "tier": "bronze",
+                    }
+                )
+
+        print(f"✅ 成就計算完成，共 {len(achievements)} 個成就")
+        print("=" * 60)
+        print("🎉 Recap 生成完成！")
+        print("=" * 60 + "\n")
 
         return {
             "username": request.username,
@@ -1054,6 +1555,20 @@ async def get_user_recap(request: RecapRequest):
             "format_distribution": dict(
                 sorted(format_count.items(), key=lambda x: x[1], reverse=True)
             ),
+            "tag_distribution": top_tags,
+            "studio_distribution": top_studios,
+            "voice_actor_distribution": top_voice_actors,
+            "season_distribution": top_seasons,
+            "month_added_distribution": dict(
+                sorted(month_added_count.items(), key=lambda x: x[0])
+            ),
+            "month_completed_distribution": dict(
+                sorted(month_completed_count.items(), key=lambda x: x[0])
+            ),
+            "monthly_representative": dict(
+                sorted(monthly_representative.items(), key=lambda x: x[0])
+            ),
+            "most_rewatched": repeat_anime[:5],
             "average_score": round(average_score, 1),
             "total_scored": len(scores),
             "achievements": achievements,
@@ -1062,6 +1577,7 @@ async def get_user_recap(request: RecapRequest):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"❌ Recap 生成失敗: {str(e)}")
         logger.error(f"Error generating recap: {e}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to generate recap: {str(e)}"

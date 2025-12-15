@@ -6,6 +6,7 @@ import { Recommend } from "./pages/Recommend";
 import { Synergy } from "./pages/Synergy";
 import { Timeline } from "./pages/Timeline";
 import { DropPredict } from "./pages/DropPredict";
+import { Recap } from "./pages/Recap";
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
             <Route path="/synergy" element={<Synergy />} />
             <Route path="/timeline" element={<Timeline />} />
             <Route path="/drop-predict" element={<DropPredict />} />
+            <Route path="/recap" element={<Recap />} />
           </Routes>
         </main>
       </div>
