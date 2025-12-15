@@ -816,7 +816,7 @@ async def analyze_drops(
 
 
 @app.post("/recap")
-async def get_user_recap(request: RecapRequest):
+async def get_user_recap(request: RecapRequest, session: Session = Depends(get_session)):
     """
     Generate a recap of user's anime watching activity.
     If year is provided, returns recap for that specific year.
@@ -829,9 +829,12 @@ async def get_user_recap(request: RecapRequest):
         print("=" * 60)
         logger.info(f"Generating recap for {request.username}, year={request.year}")
 
+        # Create AniListClient with database session for caching
+        client_with_cache = AniListClient(db_session=session)
+
         # Fetch user's complete anime list
         print("🔄 正在抓取使用者動漫列表...")
-        user_list = await anilist_client.get_user_anime_list(request.username)
+        user_list = await client_with_cache.get_user_anime_list(request.username)
         print(f"✅ 成功抓取 {len(user_list) if user_list else 0} 筆資料")
 
         if not user_list:
@@ -1070,7 +1073,7 @@ async def get_user_recap(request: RecapRequest):
                     if idx % 20 == 0:
                         print(f"  - 進度: {idx}/{len(anime_ids_for_va)}")
 
-                    anime_va_data = await anilist_client.get_anime_voice_actors(
+                    anime_va_data = await client_with_cache.get_anime_voice_actors(
                         anime_id
                     )
                     return (anime_id, anime_va_data)

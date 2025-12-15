@@ -902,7 +902,7 @@ export const Recap = () => {
                 <div className="bg-gradient-to-br from-purple-600 to-purple-800 p-6 rounded-xl">
                   <div className="text-4xl mb-3">👑</div>
                   <h4 className="text-lg font-bold mb-2">最愛作品</h4>
-                  <p className="text-base text-purple-100 line-clamp-2">
+                  <p className="text-xl text-purple-100 line-clamp-2">
                     {recapData.top_anime[0].title_english ||
                       recapData.top_anime[0].title}
                   </p>
@@ -931,7 +931,7 @@ export const Recap = () => {
                 <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-xl">
                   <div className="text-4xl mb-3">🏢</div>
                   <h4 className="text-lg font-bold mb-2">最愛製作公司</h4>
-                  <p className="text-base text-blue-100 line-clamp-2">
+                  <p className="text-xl text-blue-100 line-clamp-2">
                     {Object.values(recapData.studio_distribution)[0].name}
                   </p>
                   <p className="text-base text-blue-200 mt-2">
@@ -945,7 +945,7 @@ export const Recap = () => {
               {Object.keys(recapData.voice_actor_distribution).length > 0 && (
                 <div className="bg-gradient-to-br from-cyan-600 to-cyan-800 p-6 rounded-xl">
                   <div className="text-4xl mb-3">🎤</div>
-                  <h4 className="text-lg font-bold mb-2">最愛聲優</h4>
+                  <h4 className="text-xl font-bold mb-2">最愛聲優</h4>
                   <p className="text-base text-cyan-100 line-clamp-2">
                     {Object.values(recapData.voice_actor_distribution)[0].name}
                   </p>
@@ -977,7 +977,7 @@ export const Recap = () => {
                 <div className="bg-gradient-to-br from-orange-600 to-orange-800 p-6 rounded-xl">
                   <div className="text-4xl mb-3">📅</div>
                   <h4 className="text-lg font-bold mb-2">最熱血的季節</h4>
-                  <p className="text-base text-orange-100">
+                  <p className="text-xl text-orange-100">
                     {Object.keys(recapData.season_distribution)[0]}
                   </p>
                   <p className="text-xl font-bold text-orange-200 mt-2">
@@ -991,7 +991,7 @@ export const Recap = () => {
                 <div className="bg-gradient-to-br from-violet-600 to-violet-800 p-6 rounded-xl">
                   <div className="text-4xl mb-3">🔄</div>
                   <h4 className="text-lg font-bold mb-2">重看冠軍</h4>
-                  <p className="text-base text-violet-100 line-clamp-2">
+                  <p className="text-xl text-violet-100 line-clamp-2">
                     {recapData.most_rewatched[0].title_english ||
                       recapData.most_rewatched[0].title}
                   </p>
@@ -1005,7 +1005,7 @@ export const Recap = () => {
               <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-6 rounded-xl">
                 <div className="text-4xl mb-3">📊</div>
                 <h4 className="text-lg font-bold mb-2">總計統計</h4>
-                <p className="text-base text-indigo-100">
+                <p className="text-xl text-indigo-100">
                   {recapData.total_anime} 部動漫
                 </p>
                 <p className="text-base text-indigo-100">
@@ -1023,7 +1023,7 @@ export const Recap = () => {
                     {recapData.achievements[0].icon}
                   </div>
                   <h4 className="text-lg font-bold mb-2">頂級成就</h4>
-                  <p className="text-base text-yellow-100 font-bold line-clamp-2">
+                  <p className="text-xl text-yellow-100 font-bold line-clamp-2">
                     {recapData.achievements[0].title}
                   </p>
                   <p className="text-sm text-yellow-200 mt-2 line-clamp-2">
@@ -1316,7 +1316,7 @@ export const Recap = () => {
             <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
               <h3 className="text-2xl font-bold mb-6 flex items-center gap-2">
                 <Star className="w-6 h-6 text-blue-400" />
-                最常聽到的聲優 Top 20
+                最常聽的聲優 Top 20
               </h3>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                 {Object.values(recapData.voice_actor_distribution)

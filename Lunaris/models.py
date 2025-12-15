@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import datetime
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -40,3 +41,14 @@ class UserRating(SQLModel, table=True):
     anilist_id: Optional[int] = Field(
         default=None, description="The user's ID on AniList"
     )
+
+
+class AnimeVoiceActorCache(SQLModel, table=True):
+    """快取動漫聲優資料，避免重複查詢 AniList API"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    anime_id: int = Field(index=True, unique=True)  # AniList 動漫 ID
+    voice_actors_data: str  # JSON 字串格式儲存聲優資料
+    cached_at: datetime = Field(default_factory=datetime.utcnow)  # 快取時間
+
+    # 可選：如果需要定期更新快取，可以加上過期時間檢查
+    # 例如：超過 30 天的快取可以重新抓取
