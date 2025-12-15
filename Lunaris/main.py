@@ -1,10 +1,13 @@
 import asyncio
+import json
 import logging
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -15,6 +18,7 @@ from drop_analysis_engine import DropAnalysisEngine
 from hybrid_recommendation_engine import HybridRecommendationEngine
 from ingest_data import fetch_and_store_anime, fetch_and_store_user_data
 from models import User
+from progress_tracker import progress_manager
 from recommendation_engine import RecommendationEngine
 
 # Configure logging
@@ -164,6 +168,12 @@ class UserInfoRequest(BaseModel):
 
 class AnalyzeDropsRequest(BaseModel):
     username: str
+    task_id: Optional[str] = None  # Optional task ID for progress tracking
+
+
+class RecapRequest(BaseModel):
+    username: str
+    year: Optional[int] = None  # None means all-time recap
 
 
 # --- Endpoints ---
@@ -171,11 +181,43 @@ class AnalyzeDropsRequest(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to Lunaris Backend"}
+    return {"message": "Welcome to Lunaris API"}
 
 
 @app.get("/health")
 def health_check():
+    return {"status": "healthy"}
+
+
+@app.get("/progress/{task_id}")
+async def stream_progress(task_id: str):
+    """
+    SSE endpoint to stream progress updates for a specific task
+    """
+    tracker = progress_manager.get_task(task_id)
+    if not tracker:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    async def event_generator():
+        try:
+            for update in tracker.get_updates():
+                yield f"data: {json.dumps(update)}\n\n"
+        except Exception as e:
+            logger.error(f"Error in progress stream: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            # Clean up after streaming is done
+            progress_manager.remove_task(task_id)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
     return {"status": "ok"}
 
 
@@ -575,7 +617,13 @@ async def analyze_drops(
     """
     Fetches user's dropped list, stores data, trains model, and returns analysis.
     Now includes predictions for watching/planning anime and drop pattern statistics.
+    Supports real-time progress tracking via SSE.
     """
+    # Create progress tracker
+    task_id = request.task_id or str(uuid.uuid4())
+    tracker = progress_manager.create_task(task_id)
+    tracker.update(progress=0, stage="init", status="running", message="開始分析...")
+
     try:
         # Import needed models at function start
         from sqlmodel import select
@@ -585,12 +633,15 @@ async def analyze_drops(
         from models import UserRating
 
         logger.info(f"Starting drop analysis for user: {request.username}")
+        tracker.update(progress=2, message=f"開始分析使用者: {request.username}")
 
         # Check if user exists first
         logger.info(f"Checking if user {request.username} exists on AniList...")
+        tracker.update(progress=5, message="檢查使用者是否存在...")
         profile = await anilist_client.get_user_profile(request.username)
         if not profile:
             logger.error(f"User {request.username} not found on AniList")
+            tracker.error(f"使用者 {request.username} 不存在")
             raise HTTPException(
                 status_code=404,
                 detail=f"User '{request.username}' not found on AniList. Please check the username.",
@@ -600,17 +651,21 @@ async def analyze_drops(
 
         # 1. Fetch and Store User Data (Ingest)
         logger.info(f"Fetching and storing anime list for {request.username}...")
+        tracker.update(progress=10, stage="fetch_data", message="正在抓取動漫列表...")
         try:
             await fetch_and_store_user_data(session, request.username)
             logger.info("User data stored successfully")
+            tracker.update(progress=30, message="動漫列表已儲存")
         except Exception as e:
             logger.error(f"Error fetching/storing user data: {e}")
+            tracker.error(f"抓取資料失敗: {str(e)}")
             raise HTTPException(
                 status_code=500, detail=f"Failed to fetch anime list: {str(e)}"
             )
 
         # 2. Train personalized model for this user
         logger.info("Training personalized drop prediction model...")
+        tracker.update(progress=35, stage="train_model", message="開始訓練模型...")
         try:
             # Get user ID for personalized training
             db_user = session.exec(
@@ -618,20 +673,36 @@ async def analyze_drops(
             ).first()
 
             if not db_user:
+                tracker.error("資料庫中找不到使用者")
                 raise HTTPException(
                     status_code=404, detail="User not found in database"
                 )
 
-            train_result = drop_engine.train_model(session, user_id=db_user.id)
+            # Create a new drop engine with progress tracker
+            drop_engine_with_progress = DropAnalysisEngine(progress_tracker=tracker)
+            train_result = drop_engine_with_progress.train_model(
+                session, user_id=db_user.id
+            )
             logger.info(f"Model training complete: {train_result}")
+
+            # Update the global drop_engine with the trained model
+            drop_engine.model = drop_engine_with_progress.model
+            drop_engine.feature_columns = drop_engine_with_progress.feature_columns
+            drop_engine.mlb_genres = drop_engine_with_progress.mlb_genres
+            drop_engine.mlb_tags = drop_engine_with_progress.mlb_tags
+            drop_engine.le_studio = drop_engine_with_progress.le_studio
+            drop_engine.is_trained = drop_engine_with_progress.is_trained
+
         except Exception as e:
             logger.error(f"Error training model: {e}")
+            tracker.error(f"訓練模型失敗: {str(e)}")
             raise HTTPException(
                 status_code=500, detail=f"Failed to train model: {str(e)}"
             )
 
         # 3. Get User's List and categorize
         logger.info("Fetching and analyzing user's anime list...")
+        tracker.update(progress=90, stage="analyze", message="分析動漫列表...")
         try:
             user_list = await anilist_client.get_user_anime_list(request.username)
             dropped_list = []
@@ -713,7 +784,8 @@ async def analyze_drops(
             ratings = session.exec(select(UserRating)).all()
             animes = session.exec(select(AnimeModel)).all()
             drop_patterns = drop_engine.analyze_drop_patterns(ratings, animes)
-            logger.info("Drop pattern analysis complete")
+            logger.info("Drop analysis complete!")
+            tracker.complete(message="分析完成！")
         except Exception as e:
             logger.error(f"Error analyzing drop patterns: {e}")
             drop_patterns = {
@@ -723,6 +795,7 @@ async def analyze_drops(
             }
 
         return {
+            "task_id": task_id,
             "username": request.username,
             "dropped_count": len(dropped_list),
             "dropped_list": dropped_list,
@@ -732,9 +805,264 @@ async def analyze_drops(
             "drop_patterns": drop_patterns,
         }
     except HTTPException:
+        tracker.error("發生錯誤")
         raise
     except Exception as e:
         logger.error(f"Unexpected error in analyze_drops: {e}", exc_info=True)
+        tracker.error(f"發生錯誤: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"An unexpected error occurred: {str(e)}"
+        )
+
+
+@app.post("/recap")
+async def get_user_recap(request: RecapRequest):
+    """
+    Generate a recap of user's anime watching activity.
+    If year is provided, returns recap for that specific year.
+    If year is None, returns all-time recap.
+    """
+    try:
+        logger.info(f"Generating recap for {request.username}, year={request.year}")
+
+        # Fetch user's complete anime list
+        user_list = await anilist_client.get_user_anime_list(request.username)
+
+        if not user_list:
+            raise HTTPException(
+                status_code=404, detail="User not found or has no anime list"
+            )
+
+        # Filter by year if specified
+        filtered_list = []
+        for entry in user_list:
+            if request.year is not None:
+                # Check if anime was completed or updated in the specified year
+                completed_at = entry.get("completedAt", {})
+                updated_at = entry.get("updatedAt")
+                started_at = entry.get("startedAt", {})
+
+                # Check completed year
+                if completed_at and completed_at.get("year") == request.year:
+                    filtered_list.append(entry)
+                # Check started year if not completed
+                elif started_at and started_at.get("year") == request.year:
+                    filtered_list.append(entry)
+            else:
+                # All-time recap - include all entries
+                filtered_list.append(entry)
+
+        if not filtered_list:
+            return {
+                "username": request.username,
+                "year": request.year,
+                "is_all_time": request.year is None,
+                "total_anime": 0,
+                "total_episodes": 0,
+                "total_minutes": 0,
+                "total_hours": 0,
+                "completed_count": 0,
+                "watching_count": 0,
+                "dropped_count": 0,
+                "planned_count": 0,
+                "paused_count": 0,
+                "top_anime": [],
+                "genre_distribution": {},
+                "format_distribution": {},
+                "average_score": 0,
+                "total_scored": 0,
+                "achievements": [],
+            }
+
+        # Calculate statistics
+        total_anime = len(filtered_list)
+        total_episodes = 0
+        total_minutes = 0
+        completed_count = 0
+        watching_count = 0
+        dropped_count = 0
+        planned_count = 0
+        paused_count = 0
+        repeating_count = 0
+
+        genre_count = {}
+        format_count = {}
+        scores = []
+
+        # For top anime (sorted by score and episodes watched)
+        scored_anime = []
+
+        for entry in filtered_list:
+            status = entry.get("status", "")
+            progress = entry.get("progress", 0)
+            score = entry.get("score", 0)
+            media = entry.get("media", {})
+
+            # Count by status
+            if status == "COMPLETED":
+                completed_count += 1
+            elif status == "CURRENT":
+                watching_count += 1
+            elif status == "DROPPED":
+                dropped_count += 1
+            elif status == "PLANNING":
+                planned_count += 1
+            elif status == "PAUSED":
+                paused_count += 1
+            elif status == "REPEATING":
+                repeating_count += 1
+
+            # Calculate episodes and duration
+            episodes = media.get("episodes") or progress or 0
+            duration = media.get("duration") or 24  # Default 24 min per episode
+
+            if status == "COMPLETED":
+                total_episodes += episodes
+                total_minutes += episodes * duration
+            else:
+                total_episodes += progress
+                total_minutes += progress * duration
+
+            # Collect scores
+            if score > 0:
+                scores.append(score)
+                scored_anime.append(
+                    {
+                        "id": media.get("id"),
+                        "title": media.get("title", {}).get("romaji", "Unknown"),
+                        "title_english": media.get("title", {}).get("english"),
+                        "coverImage": media.get("coverImage", {}).get("large", ""),
+                        "score": score,
+                        "episodes": episodes,
+                        "progress": progress,
+                        "status": status,
+                        "genres": media.get("genres", []),
+                        "format": media.get("format", "UNKNOWN"),
+                        "averageScore": media.get("averageScore", 0),
+                        "year": media.get("seasonYear"),
+                    }
+                )
+
+            # Count genres
+            for genre in media.get("genres", []):
+                genre_count[genre] = genre_count.get(genre, 0) + 1
+
+            # Count formats
+            format_type = media.get("format", "UNKNOWN")
+            format_count[format_type] = format_count.get(format_type, 0) + 1
+
+        # Calculate top anime (by user score, then by episodes)
+        scored_anime.sort(key=lambda x: (x["score"], x["episodes"]), reverse=True)
+        top_anime = scored_anime[:10]
+
+        # Calculate average score
+        average_score = sum(scores) / len(scores) if scores else 0
+
+        # Calculate achievements
+        achievements = []
+
+        if completed_count >= 100:
+            achievements.append(
+                {
+                    "id": "century_club",
+                    "title": "百番達成！",
+                    "description": f"完成了 {completed_count} 部動漫",
+                    "icon": "🏆",
+                }
+            )
+        elif completed_count >= 50:
+            achievements.append(
+                {
+                    "id": "half_century",
+                    "title": "五十番達成！",
+                    "description": f"完成了 {completed_count} 部動漫",
+                    "icon": "⭐",
+                }
+            )
+
+        if total_episodes >= 1000:
+            achievements.append(
+                {
+                    "id": "episode_master",
+                    "title": "集數大師",
+                    "description": f"觀看了 {total_episodes} 集動漫",
+                    "icon": "📺",
+                }
+            )
+
+        total_hours = total_minutes / 60
+        if total_hours >= 100:
+            achievements.append(
+                {
+                    "id": "time_traveler",
+                    "title": "時間旅行者",
+                    "description": f"花了 {total_hours:.0f} 小時在動漫上",
+                    "icon": "⏰",
+                }
+            )
+
+        if average_score >= 80:
+            achievements.append(
+                {
+                    "id": "generous_critic",
+                    "title": "慷慨的評論家",
+                    "description": f"平均評分 {average_score:.1f}",
+                    "icon": "💯",
+                }
+            )
+
+        # Find most watched genre
+        if genre_count:
+            top_genre = max(genre_count, key=genre_count.get)
+            achievements.append(
+                {
+                    "id": "genre_expert",
+                    "title": f"{top_genre} 專家",
+                    "description": f"觀看了 {genre_count[top_genre]} 部 {top_genre} 動漫",
+                    "icon": "🎭",
+                }
+            )
+
+        if dropped_count == 0 and completed_count > 10:
+            achievements.append(
+                {
+                    "id": "never_give_up",
+                    "title": "永不放棄",
+                    "description": "沒有棄番記錄！",
+                    "icon": "💪",
+                }
+            )
+
+        return {
+            "username": request.username,
+            "year": request.year,
+            "is_all_time": request.year is None,
+            "total_anime": total_anime,
+            "total_episodes": total_episodes,
+            "total_minutes": total_minutes,
+            "total_hours": round(total_hours, 1),
+            "completed_count": completed_count,
+            "watching_count": watching_count,
+            "dropped_count": dropped_count,
+            "planned_count": planned_count,
+            "paused_count": paused_count,
+            "repeating_count": repeating_count,
+            "top_anime": top_anime,
+            "genre_distribution": dict(
+                sorted(genre_count.items(), key=lambda x: x[1], reverse=True)
+            ),
+            "format_distribution": dict(
+                sorted(format_count.items(), key=lambda x: x[1], reverse=True)
+            ),
+            "average_score": round(average_score, 1),
+            "total_scored": len(scores),
+            "achievements": achievements,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating recap: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate recap: {str(e)}"
         )

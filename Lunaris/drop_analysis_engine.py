@@ -1,19 +1,26 @@
 import logging
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 from sqlmodel import Session
+from tqdm import tqdm
 from xgboost import XGBClassifier
 
 from models import Anime, UserRating
 
 logger = logging.getLogger(__name__)
 
+# Progress tracker type hint
+try:
+    from progress_tracker import ProgressTracker
+except ImportError:
+    ProgressTracker = None
+
 
 class DropAnalysisEngine:
-    def __init__(self):
+    def __init__(self, progress_tracker: Optional[Any] = None):
         self.model: XGBClassifier | None = None
         self.feature_columns: list[str] = []
         self.mlb_genres = MultiLabelBinarizer()
@@ -23,6 +30,9 @@ class DropAnalysisEngine:
 
         # Store user tolerance metrics for inference
         self.user_tolerance_cache = {}
+
+        # Progress tracker for real-time updates
+        self.progress_tracker = progress_tracker
 
     def _calculate_user_tolerance_metrics(
         self, user_id: int, session: Session
@@ -129,6 +139,11 @@ class DropAnalysisEngine:
         from sqlmodel import select
 
         # Get all ratings (optionally filtered by user)
+        if self.progress_tracker:
+            self.progress_tracker.update(
+                progress=5, stage="prepare_features", message="正在準備特徵數據..."
+            )
+        logger.info("📊 正在準備特徵數據...")
         if user_id:
             ratings = session.exec(
                 select(UserRating).where(UserRating.user_id == user_id)
@@ -141,7 +156,9 @@ class DropAnalysisEngine:
             return pd.DataFrame()
 
         rows = []
-        for rating in ratings:
+        logger.info(f"正在處理 {len(ratings)} 筆評分記錄...")
+        total_ratings = len(ratings)
+        for idx, rating in enumerate(tqdm(ratings, desc="特徵提取", unit="筆")):
             # Skip non-terminal states for training
             if rating.status not in ["DROPPED", "COMPLETED"]:
                 continue
@@ -171,19 +188,34 @@ class DropAnalysisEngine:
 
             rows.append(row)
 
+            # Update progress every 10 items
+            if self.progress_tracker and idx % 10 == 0:
+                progress = 5 + int((idx / total_ratings) * 10)
+                self.progress_tracker.update(
+                    progress=progress, message=f"特徵提取: {idx}/{total_ratings}"
+                )
+
         df = pd.DataFrame(rows)
 
         if df.empty:
             return df
 
         # Encode categorical features
+        if self.progress_tracker:
+            self.progress_tracker.update(progress=15, message="正在編碼類別特徵...")
+        logger.info("🔧 正在編碼類別特徵...")
+
         # Genres (multi-label)
+        print("  ├─ 處理類型 (Genres)...")
         genre_lists = df["genres"].tolist()
         genres_encoded = self.mlb_genres.fit_transform(genre_lists)
         for i, genre in enumerate(self.mlb_genres.classes_):
             df[f"Genre_{genre}"] = genres_encoded[:, i]
 
         # Tags (multi-label, limit to top 30 most common)
+        if self.progress_tracker:
+            self.progress_tracker.update(progress=18, message="處理標籤 (Tags)...")
+        print("  ├─ 處理標籤 (Tags)...")
         tag_lists = df["tags"].tolist()
         tags_encoded = self.mlb_tags.fit_transform(tag_lists)
         # Only use tags that exist (up to 30)
@@ -193,13 +225,30 @@ class DropAnalysisEngine:
             df[f"Tag_{tag}"] = tags_encoded[:, i]
 
         # Studio (label encoding)
+        if self.progress_tracker:
+            self.progress_tracker.update(
+                progress=20, message="處理製作公司 (Studios)..."
+            )
+        print("  ├─ 處理製作公司 (Studios)...")
         df["studio_code"] = self.le_studio.fit_transform(df["studio"])
 
         # Season (one-hot)
+        if self.progress_tracker:
+            self.progress_tracker.update(progress=22, message="處理季節 (Seasons)...")
+        print("  └─ 處理季節 (Seasons)...")
         df = pd.get_dummies(df, columns=["season"], prefix="Season")
 
         # Drop original text columns
         df = df.drop(columns=["genres", "tags", "studio", "anime_id"])
+
+        if self.progress_tracker:
+            self.progress_tracker.update(
+                progress=25,
+                message=f"特徵準備完成！共 {len(df)} 筆樣本，{len(df.columns) - 2} 個特徵",
+            )
+        logger.info(
+            f"✅ 特徵準備完成！共 {len(df)} 筆樣本，{len(df.columns) - 2} 個特徵"
+        )
 
         return df
 
@@ -209,14 +258,30 @@ class DropAnalysisEngine:
         If user_id is provided, trains only on that user's data (personalized model).
         Otherwise trains on all users (global model).
         """
+        print("\n" + "=" * 60)
+        print("🚀 開始模型訓練...")
+        print("=" * 60)
+        if self.progress_tracker:
+            self.progress_tracker.update(
+                progress=0,
+                stage="training",
+                status="running",
+                message="開始模型訓練...",
+            )
         logger.info("Starting model training with user tolerance features...")
 
         try:
             # Prepare features (optionally filtered by user)
+            print("\n📋 階段 1/4: 準備訓練數據")
+            if self.progress_tracker:
+                self.progress_tracker.update(
+                    progress=5, stage="stage_1", message="準備訓練數據"
+                )
             df = self._prepare_features(session, user_id=user_id)
 
             if df.empty or len(df) < 10:
                 logger.warning("Insufficient data for training")
+                print("❌ 數據不足，無法訓練模型")
                 return {
                     "status": "insufficient_data",
                     "samples": len(df),
@@ -224,6 +289,11 @@ class DropAnalysisEngine:
                 }
 
             # Separate features and labels
+            print("\n📋 階段 2/4: 分離特徵與標籤")
+            if self.progress_tracker:
+                self.progress_tracker.update(
+                    progress=30, stage="stage_2", message="分離特徵與標籤"
+                )
             X = df.drop(columns=["label", "user_id"])
             y = df["label"]
 
@@ -235,11 +305,27 @@ class DropAnalysisEngine:
             n_completed = sum(y == 0)
             scale_pos_weight = n_completed / max(n_dropped, 1)
 
+            print(f"  ✓ 訓練樣本數: {len(X)}")
+            print(f"  ✓ 棄番數量: {n_dropped}")
+            print(f"  ✓ 完成數量: {n_completed}")
+            print(f"  ✓ 類別權重: {scale_pos_weight:.2f}")
+
             logger.info(f"Training with {len(X)} samples")
             logger.info(f"  Dropped: {n_dropped}, Completed: {n_completed}")
             logger.info(f"  Scale pos weight: {scale_pos_weight:.2f}")
 
             # Train XGBoost optimized for personalized small datasets
+            print("\n📋 階段 3/4: 訓練 XGBoost 模型")
+            if self.progress_tracker:
+                self.progress_tracker.update(
+                    progress=40, stage="stage_3", message="訓練 XGBoost 模型"
+                )
+            print("  模型參數:")
+            print("    ├─ 決策樹數量: 200")
+            print("    ├─ 最大深度: 3")
+            print("    ├─ 學習率: 0.05")
+            print("    └─ 訓練中...")
+
             self.model = XGBClassifier(
                 n_estimators=200,
                 max_depth=3,
@@ -252,9 +338,25 @@ class DropAnalysisEngine:
                 min_child_weight=1,
                 gamma=0.1,
             )
-            self.model.fit(X, y)
+
+            # Fit with progress tracking
+            with tqdm(total=200, desc="訓練進度", unit="樹") as pbar:
+                # XGBoost doesn't support direct progress callback, so we simulate
+                if self.progress_tracker:
+                    self.progress_tracker.update(progress=45, message="訓練模型中...")
+                self.model.fit(X, y)
+                pbar.update(200)
+                if self.progress_tracker:
+                    self.progress_tracker.update(progress=80, message="模型訓練完成")
+
+            print("  ✓ 模型訓練完成！")
 
             # Calculate metrics
+            print("\n📋 階段 4/4: 評估模型性能")
+            if self.progress_tracker:
+                self.progress_tracker.update(
+                    progress=85, stage="stage_4", message="評估模型性能"
+                )
             y_pred = self.model.predict(X)
             accuracy = (y_pred == y).mean()
 
@@ -276,10 +378,23 @@ class DropAnalysisEngine:
                 "top_features": [[str(feat), float(imp)] for feat, imp in top_features],
             }
 
+            print(f"\n🎉 訓練完成！準確率: {accuracy:.2%}")
+            print("=" * 60)
+            print(f"📊 前 5 重要特徵:")
+            for i, (feat, imp) in enumerate(top_features[:5], 1):
+                print(f"  {i}. {feat}: {imp:.4f}")
+            print("=" * 60 + "\n")
+
+            if self.progress_tracker:
+                self.progress_tracker.complete(
+                    message=f"訓練完成！準確率: {accuracy:.2%}"
+                )
             logger.info(f"Model training complete: Accuracy={accuracy:.2%}")
             return result
 
         except Exception as e:
+            if self.progress_tracker:
+                self.progress_tracker.error(message=f"訓練失敗: {str(e)}")
             logger.error(f"Error training model: {e}", exc_info=True)
             return {
                 "accuracy": 0.0,

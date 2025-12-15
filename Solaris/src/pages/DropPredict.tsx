@@ -19,6 +19,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { ProgressMonitor } from "../components/ProgressMonitor";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
@@ -58,6 +59,7 @@ interface ModelMetrics {
 }
 
 interface AnalyzeResponse {
+  task_id: string;
   username: string;
   dropped_count: number;
   dropped_list: AnimeItem[];
@@ -73,6 +75,8 @@ export const DropPredict = () => {
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [error, setError] = useState("");
   const [modalAnime, setModalAnime] = useState<AnimeItem | null>(null);
+  const [taskId, setTaskId] = useState<string>("");
+  const [showProgress, setShowProgress] = useState(false);
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,6 +89,11 @@ export const DropPredict = () => {
     setLoading(true);
     setError("");
     setResult(null);
+    setShowProgress(true);
+
+    // Generate a task ID
+    const newTaskId = `drop_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    setTaskId(newTaskId);
 
     try {
       const response = await fetch(`${BACKEND_URL}/analyze_drops`, {
@@ -92,7 +101,10 @@ export const DropPredict = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ username: username.trim() }),
+        body: JSON.stringify({
+          username: username.trim(),
+          task_id: newTaskId,
+        }),
       });
 
       if (!response.ok) {
@@ -104,9 +116,22 @@ export const DropPredict = () => {
     } catch (err: any) {
       console.error(err);
       setError(err.message || "發生錯誤，請稍後再試");
+      setShowProgress(false);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleProgressComplete = () => {
+    console.log("Progress completed");
+    setShowProgress(false);
+  };
+
+  const handleProgressError = (error: string) => {
+    console.error("Progress error:", error);
+    setError(error);
+    setShowProgress(false);
+    setLoading(false);
   };
 
   return (
@@ -161,7 +186,18 @@ export const DropPredict = () => {
         </div>
       </form>
 
-      {error && (
+      {/* Progress Monitor */}
+      {showProgress && taskId && (
+        <div className="mb-8 max-w-2xl mx-auto">
+          <ProgressMonitor
+            taskId={taskId}
+            onComplete={handleProgressComplete}
+            onError={handleProgressError}
+          />
+        </div>
+      )}
+
+      {error && !showProgress && (
         <div className="text-center text-red-400 mb-8 bg-red-900/20 p-4 rounded-lg border border-red-800 max-w-2xl mx-auto">
           {error}
         </div>

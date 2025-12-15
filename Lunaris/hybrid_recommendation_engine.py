@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from tqdm import tqdm
 
 from bert_recommender import BERTRecommender
 from recommendation_engine import RecommendationEngine
@@ -90,6 +91,9 @@ class HybridRecommendationEngine:
             return []
 
         # 階段 1: 建立使用者 profile
+        print("\n" + "=" * 60)
+        print("🎯 混合推薦引擎 - 開始推薦")
+        print("=" * 60)
         logger.info("=" * 60)
         logger.info("HYBRID RECOMMENDATION ENGINE - Starting recommendation")
         logger.info(f"BERT enabled: {self.use_bert}")
@@ -97,12 +101,20 @@ class HybridRecommendationEngine:
             f"BERT available: {self.bert_recommender is not None if self.use_bert else False}"
         )
         logger.info("=" * 60)
+        print(f"  ├─ BERT 啟用: {'是' if self.use_bert else '否'}")
+        print(f"  ├─ 使用者動畫數: {len(user_list)}")
+        print(f"  └─ 新番數量: {len(seasonal_anime)}")
+        print("\n📋 階段 1/3: 建立使用者 Profile")
         logger.info("Building user profile from watch history...")
         logger.info(f"User has {len(user_list)} entries in their list")
 
         # 內容 profile（基於實際觀看的動畫）
-        content_profile = self.content_engine.build_user_profile(user_list)
+        print("  ├─ 建立內容 Profile...")
+        with tqdm(total=100, desc="  │  內容分析", unit="%", leave=False) as pbar:
+            content_profile = self.content_engine.build_user_profile(user_list)
+            pbar.update(100)
         logger.info(f"Content profile built with {len(content_profile)} features")
+        print(f"  │  ✓ 內容 Profile: {len(content_profile)} 個特徵")
         if content_profile:
             # 顯示前 5 個 genre 權重
             genre_items = [
@@ -116,24 +128,33 @@ class HybridRecommendationEngine:
             logger.warning(
                 "Content profile is EMPTY! This will result in all 50% scores."
             )
+            print("  │  ⚠️  內容 Profile 為空！")
 
         # BERT-enhanced profile（如果可用）
         bert_profile = None
         if self.use_bert and self.bert_recommender:
+            print("  ├─ 建立 BERT Profile...")
             logger.info("Attempting to build BERT-enhanced profile...")
-            bert_profile = self._build_bert_enhanced_profile(
-                user_list, top_k=top_reference_anime
-            )
+            with tqdm(total=100, desc="  │  BERT 分析", unit="%", leave=False) as pbar:
+                bert_profile = self._build_bert_enhanced_profile(
+                    user_list, top_k=top_reference_anime
+                )
+                pbar.update(100)
             if bert_profile:
                 logger.info("BERT profile successfully built")
+                print(f"  │  ✓ BERT Profile: {len(bert_profile)} 個特徵")
             else:
                 logger.warning("BERT profile is None")
+                print("  │  ⚠️  BERT Profile 為空")
+        else:
+            print("  └─ 跳過 BERT Profile (未啟用)")
 
         # 階段 2: 評分新番
+        print(f"\n📋 階段 2/3: 評分 {len(seasonal_anime)} 部新番動畫")
         logger.info(f"Scoring {len(seasonal_anime)} seasonal anime...")
 
         scored_anime = []
-        for anime in seasonal_anime:
+        for anime in tqdm(seasonal_anime, desc="  評分進度", unit="部"):
             anime_copy = anime.copy()
 
             # 內容分數
@@ -172,10 +193,24 @@ class HybridRecommendationEngine:
             scored_anime.append(anime_copy)
 
         # 排序
-        scored_anime.sort(key=lambda x: x["match_score"], reverse=True)
+        print("\n📋 階段 3/3: 排序推薦結果")
+        with tqdm(total=100, desc="  排序中", unit="%") as pbar:
+            scored_anime.sort(key=lambda x: x["match_score"], reverse=True)
+            pbar.update(100)
 
         # 最終統計
         if scored_anime:
+            print("\n" + "=" * 60)
+            print("🎉 推薦完成！")
+            print("=" * 60)
+            print(f"  ✓ 總共評分: {len(scored_anime)} 部")
+            print(
+                f"  ✓ 前 3 名分數: {[f'{a["match_score"]:.1f}' for a in scored_anime[:3]]}"
+            )
+            print(
+                f"  ✓ 分數範圍: {scored_anime[-1]['match_score']:.1f} - {scored_anime[0]['match_score']:.1f}"
+            )
+            print("=" * 60 + "\n")
             logger.info("=" * 60)
             logger.info("HYBRID RECOMMENDATION ENGINE - Results")
             logger.info(f"Total anime scored: {len(scored_anime)}")

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -60,26 +61,36 @@ class BERTRecommender:
             model_path: 模型檔案路徑
         """
         try:
+            print(f"🔄 正在載入 BERT 模型: {model_path}")
             logger.info(f"Loading BERT model from {model_path}")
-            checkpoint = torch.load(model_path, map_location=self.device)
 
-            # 根據 checkpoint 結構載入模型
-            if isinstance(checkpoint, dict):
-                # 如果有 model_state_dict
-                if "model_state_dict" in checkpoint:
-                    state_dict = checkpoint["model_state_dict"]
+            with tqdm(total=100, desc="載入模型", unit="%") as pbar:
+                checkpoint = torch.load(model_path, map_location=self.device)
+                pbar.update(50)
+
+                # 根據 checkpoint 結構載入模型
+                if isinstance(checkpoint, dict):
+                    # 如果有 model_state_dict
+                    if "model_state_dict" in checkpoint:
+                        state_dict = checkpoint["model_state_dict"]
+                    else:
+                        state_dict = checkpoint
+
+                    # 這裡需要實際的模型架構
+                    # 暫時儲存 state_dict，實際使用時需要完整的模型定義
+                    self.model_state = state_dict
+                    logger.info("Model checkpoint loaded successfully")
+                    pbar.update(30)
                 else:
-                    state_dict = checkpoint
+                    self.model = checkpoint
+                    self.model.to(self.device)
+                    self.model.eval()
+                    logger.info("Model loaded and moved to device")
+                    pbar.update(30)
 
-                # 這裡需要實際的模型架構
-                # 暫時儲存 state_dict，實際使用時需要完整的模型定義
-                self.model_state = state_dict
-                logger.info("Model checkpoint loaded successfully")
-            else:
-                self.model = checkpoint
-                self.model.to(self.device)
-                self.model.eval()
-                logger.info("Model loaded and moved to device")
+                pbar.update(20)
+
+            print("✅ BERT 模型載入完成！")
 
         except Exception as e:
             logger.error(f"Failed to load BERT model: {e}")
@@ -93,17 +104,23 @@ class BERTRecommender:
             dataset_path: 資料集 pickle 檔案路徑
         """
         try:
+            print(f"🔄 正在載入資料集: {dataset_path}")
             logger.info(f"Loading dataset from {dataset_path}")
-            with open(dataset_path, "rb") as f:
-                self.dataset = pickle.load(f)
 
-            # 建立 ID 映射
-            if hasattr(self.dataset, "smap"):
-                # smap: item_id -> sequential_id
-                self.id_mapping = self.dataset.smap
-                self.reverse_id_mapping = {v: k for k, v in self.id_mapping.items()}
+            with tqdm(total=100, desc="載入資料集", unit="%") as pbar:
+                with open(dataset_path, "rb") as f:
+                    self.dataset = pickle.load(f)
+                pbar.update(70)
+
+                # 建立 ID 映射
+                if hasattr(self.dataset, "smap"):
+                    # smap: item_id -> sequential_id
+                    self.id_mapping = self.dataset.smap
+                    self.reverse_id_mapping = {v: k for k, v in self.id_mapping.items()}
+                pbar.update(30)
 
             logger.info(f"Dataset loaded with {len(self.id_mapping)} items")
+            print(f"✅ 資料集載入完成！共 {len(self.id_mapping)} 個項目")
 
         except Exception as e:
             logger.error(f"Failed to load dataset: {e}")
@@ -117,19 +134,26 @@ class BERTRecommender:
             metadata_path: Metadata JSON 檔案路徑
         """
         try:
+            print(f"🔄 正在載入動畫 Metadata: {metadata_path}")
             logger.info(f"Loading anime metadata from {metadata_path}")
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
 
-            # 假設 metadata 是 list of dicts 或 dict
-            if isinstance(metadata, list):
-                self.anime_metadata = {
-                    item.get("id") or item.get("anime_id"): item for item in metadata
-                }
-            else:
-                self.anime_metadata = metadata
+            with tqdm(total=100, desc="載入 Metadata", unit="%") as pbar:
+                with open(metadata_path, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+                pbar.update(80)
+
+                # 假設 metadata 是 list of dicts 或 dict
+                if isinstance(metadata, list):
+                    self.anime_metadata = {
+                        item.get("id") or item.get("anime_id"): item
+                        for item in metadata
+                    }
+                else:
+                    self.anime_metadata = metadata
+                pbar.update(20)
 
             logger.info(f"Loaded metadata for {len(self.anime_metadata)} anime")
+            print(f"✅ Metadata 載入完成！共 {len(self.anime_metadata)} 部動畫")
 
         except Exception as e:
             logger.error(f"Failed to load anime metadata: {e}")
@@ -194,36 +218,49 @@ class BERTRecommender:
             return []
 
         try:
+            print("\n" + "=" * 60)
+            print("🎯 開始生成推薦...")
+            print("=" * 60)
+
             # 1. ID 映射
+            print("\n📋 階段 1/4: ID 映射")
             if use_anilist_ids:
                 dataset_ids = []
-                for aid in user_anime_ids:
+                for aid in tqdm(user_anime_ids, desc="映射 AniList ID", unit="個"):
                     did = self.map_anilist_id_to_dataset_id(aid)
                     if did is not None:
                         dataset_ids.append(did)
                 logger.info(
                     f"Mapped {len(dataset_ids)}/{len(user_anime_ids)} AniList IDs to dataset IDs"
                 )
+                print(f"  ✓ 成功映射 {len(dataset_ids)}/{len(user_anime_ids)} 個 ID")
             else:
                 dataset_ids = user_anime_ids
 
             if not dataset_ids:
                 logger.warning("No valid dataset IDs found")
+                print("❌ 沒有找到有效的 ID")
                 return []
 
             # 2. 準備模型輸入
+            print("\n📋 階段 2/4: 準備模型輸入")
             # 這裡需要根據實際的 BERT4Rec 輸入格式來準備
             # 通常是一個序列的 token IDs
-            input_seq = self._prepare_input_sequence(dataset_ids)
+            with tqdm(total=100, desc="準備輸入序列", unit="%") as pbar:
+                input_seq = self._prepare_input_sequence(dataset_ids)
+                pbar.update(100)
 
             # 3. 模型推理
+            print("\n📋 階段 3/4: 模型推理")
             scores = self._inference(input_seq)
+            print("  ✓ 推理完成")
 
             # 4. 獲取 Top-K 推薦
+            print(f"\n📋 階段 4/4: 生成 Top-{top_k} 推薦")
             top_indices = np.argsort(scores)[-top_k:][::-1]
             recommendations = []
 
-            for idx in top_indices:
+            for idx in tqdm(top_indices, desc="處理推薦結果", unit="個"):
                 dataset_id = idx
                 score = float(scores[idx])
 
@@ -238,6 +275,8 @@ class BERTRecommender:
                 }
                 recommendations.append(rec)
 
+            print(f"\n🎉 推薦生成完成！共 {len(recommendations)} 個推薦")
+            print("=" * 60 + "\n")
             return recommendations
 
         except Exception as e:
@@ -283,21 +322,25 @@ class BERTRecommender:
             # 如果模型未完全載入，返回隨機分數（用於測試）
             logger.warning("Model not fully loaded, returning dummy scores")
             num_items = len(self.id_mapping) if self.id_mapping else 1000
+            print("  ⚠️  使用模擬分數（模型未完全載入）")
             return np.random.rand(num_items)
 
         try:
             with torch.no_grad():
-                # 執行前向傳播
-                output = self.model(input_seq)
+                with tqdm(total=100, desc="模型推理中", unit="%") as pbar:
+                    # 執行前向傳播
+                    output = self.model(input_seq)
+                    pbar.update(70)
 
-                # 獲取最後一個位置的預測（MASK 位置）
-                if isinstance(output, tuple):
-                    logits = output[0]
-                else:
-                    logits = output
+                    # 獲取最後一個位置的預測（MASK 位置）
+                    if isinstance(output, tuple):
+                        logits = output[0]
+                    else:
+                        logits = output
 
-                # 取最後一個時間步的輸出
-                scores = logits[:, -1, :].cpu().numpy()[0]
+                    # 取最後一個時間步的輸出
+                    scores = logits[:, -1, :].cpu().numpy()[0]
+                    pbar.update(30)
 
                 return scores
 
@@ -330,7 +373,7 @@ class BERTRecommender:
             "seasons": Counter(),
         }
 
-        for aid in anime_ids:
+        for aid in tqdm(anime_ids, desc="提取動畫特徵", unit="部"):
             # 獲取 metadata
             if use_anilist_ids:
                 metadata = self.anime_metadata.get(aid, {})
