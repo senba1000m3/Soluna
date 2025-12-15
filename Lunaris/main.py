@@ -438,8 +438,7 @@ async def predict_drop(request: DropPredictRequest):
 @app.post("/pair_compare")
 async def compare_users(request: PairCompareRequest):
     """
-    Compare two users' tastes and compatibility.
-    Fetches basic profiles for now.
+    Compare two users' tastes and compatibility with detailed analytics.
     """
     try:
         logger.info(f"Comparing users {request.user1} and {request.user2}")
@@ -469,14 +468,21 @@ async def compare_users(request: PairCompareRequest):
         p1 = rec_engine.build_user_profile(user1_list)
         p2 = rec_engine.build_user_profile(user2_list)
 
-        # Compare
-        comparison = rec_engine.compare_users(p1, p2)
+        # Detailed comparison
+        comparison = rec_engine.detailed_user_comparison(user1_list, user2_list, p1, p2)
 
         return {
             "user1": user1_profile,
             "user2": user2_profile,
             "compatibility_score": comparison["score"],
             "common_genres": comparison["common_genres"],
+            "common_anime": comparison["common_anime"],
+            "common_count": comparison["common_count"],
+            "disagreements": comparison["disagreements"],
+            "avg_score_difference": comparison["avg_score_difference"],
+            "radar_data": comparison["radar_data"],
+            "stats": comparison["stats"],
+            "recommendations": comparison["recommendations"],
             "message": "Comparison successful",
         }
     except HTTPException as he:
@@ -816,7 +822,9 @@ async def analyze_drops(
 
 
 @app.post("/recap")
-async def get_user_recap(request: RecapRequest, session: Session = Depends(get_session)):
+async def get_user_recap(
+    request: RecapRequest, session: Session = Depends(get_session)
+):
     """
     Generate a recap of user's anime watching activity.
     If year is provided, returns recap for that specific year.
@@ -1133,8 +1141,12 @@ async def get_user_recap(request: RecapRequest, session: Session = Depends(get_s
                         )
                         # Store VA details
                         if va_full_name not in voice_actor_details:
-                            voice_actor_details[va_full_name] = va_details_map[va_full_name]
-                        voice_actor_details[va_full_name]["count"] = voice_actor_count[va_full_name]
+                            voice_actor_details[va_full_name] = va_details_map[
+                                va_full_name
+                            ]
+                        voice_actor_details[va_full_name]["count"] = voice_actor_count[
+                            va_full_name
+                        ]
 
         print(f"✅ 聲優數據抓取完成!")
         print(f"  - 找到的聲優總數: {len(voice_actor_count)}")

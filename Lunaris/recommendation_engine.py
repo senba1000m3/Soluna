@@ -279,6 +279,186 @@ class RecommendationEngine:
             "common_genres": common_genres[:5],
         }
 
+    def detailed_user_comparison(
+        self,
+        user1_list: List[Dict[str, Any]],
+        user2_list: List[Dict[str, Any]],
+        user1_profile: Dict[str, float],
+        user2_profile: Dict[str, float],
+    ) -> Dict[str, Any]:
+        """
+        Enhanced comparison with detailed analytics:
+        - Common anime with score comparison
+        - Radar chart data for genre overlap
+        - Statistics comparison
+        - Mutual recommendations
+        """
+        # Basic compatibility score
+        basic_comparison = self.compare_users(user1_profile, user2_profile)
+
+        # Extract anime IDs
+        user1_anime = {entry["media"]["id"]: entry for entry in user1_list}
+        user2_anime = {entry["media"]["id"]: entry for entry in user2_list}
+
+        # Find common anime
+        common_ids = set(user1_anime.keys()) & set(user2_anime.keys())
+        common_anime = []
+        score_differences = []
+
+        for anime_id in common_ids:
+            entry1 = user1_anime[anime_id]
+            entry2 = user2_anime[anime_id]
+            score1 = entry1.get("score", 0)
+            score2 = entry2.get("score", 0)
+
+            if score1 > 0 and score2 > 0:  # Both rated it
+                diff = abs(score1 - score2)
+                score_differences.append(diff)
+
+                common_anime.append(
+                    {
+                        "id": anime_id,
+                        "title": entry1["media"]["title"]["romaji"],
+                        "coverImage": entry1["media"]["coverImage"]["large"],
+                        "user1_score": score1,
+                        "user2_score": score2,
+                        "score_diff": diff,
+                        "average_score": entry1["media"].get("averageScore", 0),
+                    }
+                )
+
+        # Sort by combined interest (higher scores from both)
+        common_anime.sort(
+            key=lambda x: (x["user1_score"] + x["user2_score"]) / 2, reverse=True
+        )
+
+        # Find biggest disagreements
+        disagreements = sorted(
+            common_anime, key=lambda x: x["score_diff"], reverse=True
+        )[:5]
+
+        # Radar chart data - top 6 genres for both users
+        radar_data = self._build_radar_data(user1_profile, user2_profile)
+
+        # Statistics
+        stats = self._calculate_user_stats(user1_list, user2_list)
+
+        # Mutual recommendations (what one has seen that the other hasn't)
+        user1_only = set(user1_anime.keys()) - set(user2_anime.keys())
+        user2_only = set(user2_anime.keys()) - set(user1_anime.keys())
+
+        recommend_to_user2 = []
+        for anime_id in user1_only:
+            entry = user1_anime[anime_id]
+            score = entry.get("score", 0)
+            if score >= 8:  # High rated by user1
+                recommend_to_user2.append(
+                    {
+                        "id": anime_id,
+                        "title": entry["media"]["title"]["romaji"],
+                        "coverImage": entry["media"]["coverImage"]["large"],
+                        "score": score,
+                        "genres": entry["media"].get("genres", []),
+                    }
+                )
+
+        recommend_to_user1 = []
+        for anime_id in user2_only:
+            entry = user2_anime[anime_id]
+            score = entry.get("score", 0)
+            if score >= 8:  # High rated by user2
+                recommend_to_user1.append(
+                    {
+                        "id": anime_id,
+                        "title": entry["media"]["title"]["romaji"],
+                        "coverImage": entry["media"]["coverImage"]["large"],
+                        "score": score,
+                        "genres": entry["media"].get("genres", []),
+                    }
+                )
+
+        # Sort by score
+        recommend_to_user2.sort(key=lambda x: x["score"], reverse=True)
+        recommend_to_user1.sort(key=lambda x: x["score"], reverse=True)
+
+        return {
+            **basic_comparison,
+            "common_anime": common_anime[:20],  # Top 20 common anime
+            "common_count": len(common_anime),
+            "disagreements": disagreements,
+            "avg_score_difference": (
+                sum(score_differences) / len(score_differences)
+                if score_differences
+                else 0
+            ),
+            "radar_data": radar_data,
+            "stats": stats,
+            "recommendations": {
+                "for_user1": recommend_to_user1[:10],
+                "for_user2": recommend_to_user2[:10],
+            },
+        }
+
+    def _build_radar_data(
+        self, user1_profile: Dict[str, float], user2_profile: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """
+        Build radar chart data for top genres
+        """
+        # Get all genres with weights
+        all_genres = set(user1_profile.keys()) | set(user2_profile.keys())
+
+        # Calculate combined importance
+        genre_importance = []
+        for genre in all_genres:
+            w1 = user1_profile.get(genre, 0)
+            w2 = user2_profile.get(genre, 0)
+            combined = max(w1, w2)  # Take the higher weight
+            genre_importance.append((genre, w1, w2, combined))
+
+        # Sort and take top 8
+        genre_importance.sort(key=lambda x: x[3], reverse=True)
+        top_genres = genre_importance[:8]
+
+        # Normalize to 0-100 scale for radar chart
+        max_weight = max([x[3] for x in top_genres]) if top_genres else 1
+
+        labels = []
+        user1_values = []
+        user2_values = []
+
+        for genre, w1, w2, _ in top_genres:
+            labels.append(genre.replace("Genre_", ""))
+            user1_values.append((w1 / max_weight) * 100 if max_weight > 0 else 0)
+            user2_values.append((w2 / max_weight) * 100 if max_weight > 0 else 0)
+
+        return {"labels": labels, "user1": user1_values, "user2": user2_values}
+
+    def _calculate_user_stats(
+        self, user1_list: List[Dict[str, Any]], user2_list: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Calculate and compare user statistics
+        """
+
+        def calc_stats(user_list):
+            total = len(user_list)
+            completed = sum(1 for e in user_list if e.get("status") == "COMPLETED")
+            scores = [e.get("score", 0) for e in user_list if e.get("score", 0) > 0]
+            avg_score = sum(scores) / len(scores) if scores else 0
+
+            # Count episodes watched
+            episodes = sum(e.get("progress", 0) for e in user_list)
+
+            return {
+                "total_anime": total,
+                "completed": completed,
+                "avg_score": round(avg_score, 2),
+                "episodes_watched": episodes,
+            }
+
+        return {"user1": calc_stats(user1_list), "user2": calc_stats(user2_list)}
+
     def select_representative_anime(
         self,
         year: int,
