@@ -1,0 +1,29 @@
+2025-12-16 21:23:25,627 - __main__ - INFO - 💾 Checkpoint 已儲存: bert_models\best_model.pth
+2025-12-16 21:23:26,458 - __main__ - INFO - 💾 Checkpoint 已儲存: bert_models\best_model.pth
+2025-12-16 21:23:27,291 - __main__ - INFO - 💾 Checkpoint 已儲存: bert_models\best_model.pth
+2025-12-16 21:23:28,200 - __main__ - INFO - 💾 Checkpoint 已儲存: bert_models\best_model.pth
+2025-12-16 21:23:29,035 - __main__ - INFO - 💾 Checkpoint 已儲存: bert_models\checkpoint_epoch_5.pth
+2025-12-16 21:23:29,065 - __main__ - INFO - 💾 Checkpoint 已儲存: bert_models\best_model.pth
+2025-12-16 21:23:29,890 - __main__ - INFO - 💾 Checkpoint 已儲存: bert_models\best_model.pth
+2025-12-16 21:23:30,652 - __main__ - INFO - 💾 Checkpoint 已儲存: bert_models\best_model.pth
+2025-12-16 21:23:30,888 - __main__ - ERROR - 訓練失敗: [Errno 22] Invalid argument
+Traceback (most recent call last):
+  File "E:\MyData\selfdata\University\11401\CC\Soluna\Lunaris\bert_model\train_bert_model.py", line 621, in main
+    train_loss = trainer.train_epoch(train_loader)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\MyData\selfdata\University\11401\CC\Soluna\Lunaris\bert_model\train_bert_model.py", line 329, in train_epoch
+    progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
+  File "E:\MyData\selfdata\University\11401\CC\Soluna\Lunaris\.venv\Lib\site-packages\tqdm\std.py", line 1431, in set_postfix
+    self.refresh()
+  File "E:\MyData\selfdata\University\11401\CC\Soluna\Lunaris\.venv\Lib\site-packages\tqdm\std.py", line 1347, in refresh
+    self.display()
+  File "E:\MyData\selfdata\University\11401\CC\Soluna\Lunaris\.venv\Lib\site-packages\tqdm\std.py", line 1495, in display
+    self.sp(self.__str__() if msg is None else msg)
+  File "E:\MyData\selfdata\University\11401\CC\Soluna\Lunaris\.venv\Lib\site-packages\tqdm\std.py", line 459, in print_status
+    fp_write('\r' + s + (' ' * max(last_len[0] - len_s, 0)))
+  File "E:\MyData\selfdata\University\11401\CC\Soluna\Lunaris\.venv\Lib\site-packages\tqdm\std.py", line 453, in fp_write
+    fp_flush()
+  File "E:\MyData\selfdata\University\11401\CC\Soluna\Lunaris\.venv\Lib\site-packages\tqdm\utils.py", line 196, in inner
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 22] Invalid argument

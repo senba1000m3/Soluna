@@ -92,3 +92,68 @@ class AnimeVoiceActorCache(SQLModel, table=True):
 
     # 可選：如果需要定期更新快取，可以加上過期時間檢查
     # 例如：超過 30 天的快取可以重新抓取
+
+
+class BERTUserProfile(SQLModel, table=True):
+    """快取 BERT 使用者 Profile，避免每次都重新訓練"""
+
+    __tablename__ = "bert_user_profile"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    anilist_username: str = Field(index=True, unique=True)  # AniList 使用者名稱
+    anilist_id: int = Field(index=True)  # AniList 使用者 ID
+
+    # 使用者觀看的動畫 ID 列表（JSON 陣列字串）
+    user_anime_ids: str = Field(description="JSON array of anime IDs user has watched")
+
+    # BERT 提取的特徵 Profile（JSON 物件字串）
+    bert_features: str = Field(
+        description="JSON object of BERT-extracted features (genres, tags, etc.)"
+    )
+
+    # Profile 的 hash，用於檢測使用者列表是否有變化
+    profile_hash: str = Field(
+        index=True, description="Hash of user anime list for change detection"
+    )
+
+    # 時間戳記
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # 元數據
+    anime_count: int = Field(description="Number of anime in user's list")
+    model_version: str = Field(default="v1", description="BERT model version used")
+
+
+class BERTRecommendationCache(SQLModel, table=True):
+    """快取 BERT 推薦結果，避免重複推理"""
+
+    __tablename__ = "bert_recommendation_cache"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    anilist_username: str = Field(index=True)  # AniList 使用者名稱
+    profile_hash: str = Field(
+        index=True, description="User profile hash for cache invalidation"
+    )
+
+    # BERT 推薦的動畫列表（JSON 陣列，包含 anime_id 和 score）
+    recommendations: str = Field(
+        description="JSON array of recommended anime with scores"
+    )
+
+    # 推薦參數
+    top_k: int = Field(default=50, description="Number of recommendations stored")
+
+    # 時間戳記
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    cached_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # 元數據
+    model_version: str = Field(default="v1", description="BERT model version used")
+    cache_hit_count: int = Field(
+        default=0, description="Number of times this cache was used"
+    )
+
+    # 建立複合索引以加速查詢
+    class Config:
+        indexes = [{"fields": ["anilist_username", "profile_hash"], "unique": True}]

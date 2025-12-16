@@ -9,9 +9,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from sqlmodel import Session
 from tqdm import tqdm
 
-from bert_recommender import BERTRecommender
+from bert_model.bert_recommender_optimized import OptimizedBERTRecommender
+from database import engine
 from recommendation_engine import RecommendationEngine
 
 logger = logging.getLogger(__name__)
@@ -28,9 +30,10 @@ class HybridRecommendationEngine:
 
     def __init__(
         self,
-        bert_model_path: Optional[str] = None,
-        bert_dataset_path: Optional[str] = None,
-        bert_metadata_path: Optional[str] = None,
+        bert_model_path: Optional[str] = "bert_model/trained_models/best_model.pth",
+        bert_dataset_path: Optional[
+            str
+        ] = "bert_model/trained_models/item_mappings.pkl",
         use_bert: bool = True,
     ):
         """
@@ -38,8 +41,7 @@ class HybridRecommendationEngine:
 
         Args:
             bert_model_path: BERT 模型路徑
-            bert_dataset_path: BERT 資料集路徑
-            bert_metadata_path: 動畫 metadata 路徑
+            bert_dataset_path: BERT 映射資料路徑
             use_bert: 是否啟用 BERT 推薦（False 時僅使用內容推薦）
         """
         # 內容推薦引擎（基於 genre/tags）
@@ -51,16 +53,24 @@ class HybridRecommendationEngine:
 
         if use_bert:
             try:
-                self.bert_recommender = BERTRecommender(
-                    model_path=bert_model_path,
-                    dataset_path=bert_dataset_path,
-                    anime_metadata_path=bert_metadata_path,
-                )
-                if self.bert_recommender.is_available():
-                    logger.info("BERT recommender loaded successfully")
-                else:
-                    logger.warning("BERT recommender not fully available")
+                # 檢查模型檔案是否存在
+                from pathlib import Path
+
+                if not Path(bert_model_path).exists():
+                    logger.warning(
+                        f"BERT model not found at {bert_model_path}, disabling BERT recommendations"
+                    )
                     self.use_bert = False
+                    return
+
+                with Session(engine) as session:
+                    self.bert_recommender = OptimizedBERTRecommender(
+                        model_path=bert_model_path,
+                        dataset_path=bert_dataset_path,
+                        db_session=session,
+                        device="auto",
+                    )
+                logger.info("✅ BERT recommender loaded successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize BERT recommender: {e}")
                 self.use_bert = False
@@ -70,8 +80,8 @@ class HybridRecommendationEngine:
         self,
         user_list: List[Dict[str, Any]],
         seasonal_anime: List[Dict[str, Any]],
-        bert_weight: float = 0.6,
-        content_weight: float = 0.4,
+        bert_weight: float = 0.8,
+        content_weight: float = 0.2,
         top_reference_anime: int = 50,
     ) -> List[Dict[str, Any]]:
         """
@@ -235,7 +245,7 @@ class HybridRecommendationEngine:
             top_k: 取前 K 個 BERT 推薦作為參考
 
         Returns:
-            增強的特徵 profile
+            增強的特徵 profile (genres/tags 加權)
         """
         if not self.bert_recommender:
             return None
@@ -257,36 +267,58 @@ class HybridRecommendationEngine:
             logger.info(
                 f"Getting BERT recommendations for {len(user_anime_ids)} anime..."
             )
-            bert_recommendations = self.bert_recommender.get_recommendations(
-                user_anime_ids, top_k=top_k, use_anilist_ids=True
-            )
+
+            with Session(engine) as session:
+                self.bert_recommender.db_session = session
+                bert_recommendations = self.bert_recommender.get_recommendations(
+                    user_anime_ids=user_anime_ids, top_k=top_k, use_anilist_ids=True
+                )
 
             if not bert_recommendations:
                 logger.warning("BERT returned no recommendations")
                 return None
 
-            # 提取推薦動畫的 ID
-            recommended_ids = []
+            logger.info(f"Got {len(bert_recommendations)} BERT recommendations")
+
+            # 從推薦結果建立特徵 profile
+            # 使用推薦分數作為權重，累積 genres 和 tags
+            genre_weights = defaultdict(float)
+            tag_weights = defaultdict(float)
+
             for rec in bert_recommendations:
-                if rec.get("anilist_id"):
-                    recommended_ids.append(rec["anilist_id"])
-                elif rec.get("dataset_id"):
-                    recommended_ids.append(rec["dataset_id"])
+                score = rec.get("score", 0.5)
 
-            # 分析這些推薦動畫的特徵
+                # 累積 genres
+                for genre in rec.get("genres", []):
+                    genre_weights[f"Genre_{genre}"] += score
+
+                # 累積 tags (只取高相關的)
+                for tag in rec.get("tags", [])[:10]:  # 只取前 10 個 tags
+                    if isinstance(tag, dict):
+                        tag_name = tag.get("name", "")
+                        tag_rank = tag.get("rank", 0)
+                        if tag_rank >= 60:  # 只取相關度高的 tag
+                            tag_weights[f"Tag_{tag_name}"] += score * (tag_rank / 100)
+                    elif isinstance(tag, str):
+                        tag_weights[f"Tag_{tag}"] += score
+
+            # 正規化權重
+            total_weight = sum(genre_weights.values()) + sum(tag_weights.values())
+            if total_weight > 0:
+                for k in genre_weights:
+                    genre_weights[k] /= total_weight
+                for k in tag_weights:
+                    tag_weights[k] /= total_weight
+
+            # 合併成一個 profile
+            bert_profile = {**genre_weights, **tag_weights}
+
+            logger.info(f"BERT profile built with {len(bert_profile)} features")
             logger.info(
-                f"Analyzing features from {len(recommended_ids)} BERT recommendations..."
-            )
-            features = self.bert_recommender.get_anime_features(
-                recommended_ids, use_anilist_ids=True
+                f"Top 5 genres: {sorted(genre_weights.items(), key=lambda x: x[1], reverse=True)[:5]}"
             )
 
-            # 加權處理（根據推薦分數）
-            weighted_features = self._weight_features_by_score(
-                features, bert_recommendations
-            )
-
-            return weighted_features
+            return bert_profile if bert_profile else None
 
         except Exception as e:
             logger.error(f"Error building BERT-enhanced profile: {e}")
@@ -395,7 +427,7 @@ class HybridRecommendationEngine:
 
         Args:
             anime: 動畫資料
-            bert_profile: BERT 增強的 profile
+            bert_profile: BERT 增強的 profile (扁平化的 Genre_/Tag_ 結構)
 
         Returns:
             相似度分數 (0-100)
@@ -403,56 +435,39 @@ class HybridRecommendationEngine:
         if not bert_profile:
             return 50.0
 
+        # 建立動畫的特徵向量
+        anime_features = {}
+
+        # 提取 genres
+        for genre in anime.get("genres", []):
+            anime_features[f"Genre_{genre}"] = 1.0
+
+        # 提取 tags
+        for tag in anime.get("tags", []):
+            if isinstance(tag, dict):
+                tag_name = tag.get("name", "")
+                tag_rank = tag.get("rank", 0)
+                if tag_rank >= 60:  # 只使用高相關的 tag
+                    anime_features[f"Tag_{tag_name}"] = tag_rank / 100
+            elif isinstance(tag, str):
+                anime_features[f"Tag_{tag}"] = 1.0
+
+        # 計算加權相似度
         score = 0.0
-        match_count = 0
+        total_weight = 0.0
 
-        # Genre 匹配
-        if "genres" in bert_profile:
-            anime_genres = set(anime.get("genres", []))
-            bert_genres = set(bert_profile["genres"].keys())
-            if anime_genres and bert_genres:
-                overlap = len(anime_genres & bert_genres)
-                genre_score = (overlap / len(anime_genres)) * 100
-                score += genre_score
-                match_count += 1
+        for feature, weight in bert_profile.items():
+            total_weight += weight
+            if feature in anime_features:
+                score += weight * anime_features[feature] * 100
 
-        # Tag 匹配
-        if "tags" in bert_profile:
-            anime_tags = set()
-            for tag in anime.get("tags", []):
-                if isinstance(tag, dict):
-                    anime_tags.add(tag.get("name", ""))
-                else:
-                    anime_tags.add(tag)
+        # 正規化分數
+        if total_weight > 0:
+            score = score / total_weight
+        else:
+            score = 50.0
 
-            bert_tags = set(bert_profile["tags"].keys())
-            if anime_tags and bert_tags:
-                overlap = len(anime_tags & bert_tags)
-                # 標籤很多，降低要求
-                tag_score = min((overlap / min(len(anime_tags), 10)) * 100, 100)
-                score += tag_score
-                match_count += 1
-
-        # Studio 匹配
-        if "studios" in bert_profile:
-            anime_studios = set()
-            for studio in anime.get("studios", []):
-                if isinstance(studio, dict):
-                    anime_studios.add(studio.get("name", ""))
-                else:
-                    anime_studios.add(studio)
-
-            bert_studios = set(bert_profile["studios"].keys())
-            if anime_studios and bert_studios:
-                if anime_studios & bert_studios:
-                    score += 80  # Studio 匹配給高分
-                    match_count += 1
-
-        # 平均分數
-        if match_count > 0:
-            return score / match_count
-
-        return 50.0
+        return min(100.0, max(0.0, score))
 
     def _generate_match_reasons(
         self,
