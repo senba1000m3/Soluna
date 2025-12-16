@@ -189,6 +189,7 @@ class UserInfoRequest(BaseModel):
 
 class AnalyzeDropsRequest(BaseModel):
     username: str
+    task_id: Optional[str] = None
     limit: int = 10
 
 

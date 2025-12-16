@@ -1,6 +1,6 @@
 """
 BERT-based Anime Recommender Wrapper
-整合 AnimeRecBERT 模型用於動畫推薦
+整合 AnimeRecBERT 模型用於推薦
 """
 
 import json
