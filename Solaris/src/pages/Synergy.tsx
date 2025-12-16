@@ -217,7 +217,7 @@ const ComparisonForm: React.FC<{
           value={user1}
           onChange={onUser1Change}
           label="使用者 A"
-          placeholder="例如: senba1000m3"
+          placeholder="例如：senba1000m3"
           required={true}
         />
       </div>
@@ -233,7 +233,7 @@ const ComparisonForm: React.FC<{
           value={user2}
           onChange={onUser2Change}
           label="使用者 B"
-          placeholder="例如: thet"
+          placeholder="例如：momoha100m3"
           required={true}
         />
       </div>

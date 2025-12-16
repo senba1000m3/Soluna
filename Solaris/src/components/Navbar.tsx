@@ -297,7 +297,7 @@ export const Navbar = () => {
                   onChange={(e) => setTempUsername(e.target.value)}
                   required
                   className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
-                  placeholder="例如: senba1000m3"
+                  placeholder="例如：senba1000m3"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   系統會自動抓取你的頭像和 ID

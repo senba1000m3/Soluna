@@ -148,8 +148,8 @@ export const Recommend = () => {
           <QuickIDSelector
             value={username}
             onChange={setUsername}
-            label="AniList 使用者名稱 (選填)"
-            placeholder="例如: senba1000m3"
+            label="AniList 使用者名稱（選填）"
+            placeholder="例如：senba1000m3"
             required={false}
           />
 
@@ -170,7 +170,7 @@ export const Recommend = () => {
               type="number"
               value={year}
               onChange={(e) => setYear(e.target.value)}
-              placeholder="例如: 2025"
+              placeholder="例如：2025"
               className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
             />
           </div>

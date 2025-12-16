@@ -157,7 +157,7 @@ export const DropPredict = () => {
               value={username}
               onChange={setUsername}
               label="AniList 使用者名稱"
-              placeholder="輸入 AniList ID (例如: senba1000m3)"
+              placeholder="輸入 AniList ID（例如：senba1000m3）"
               required={true}
               className="flex-1"
             />

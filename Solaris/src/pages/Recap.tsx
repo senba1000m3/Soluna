@@ -119,7 +119,7 @@ export const Recap = () => {
   // Generate year options (current year back to 2010)
   const currentYear = new Date().getFullYear();
   const yearOptions = ["all"];
-  for (let year = currentYear; year >= 2010; year--) {
+  for (let year = currentYear; year >= currentYear - 11; year--) {
     yearOptions.push(year.toString());
   }
 
@@ -815,7 +815,7 @@ export const Recap = () => {
               value={username}
               onChange={setUsername}
               label="AniList 使用者名稱"
-              placeholder="例如: senba1000m3"
+              placeholder="例如：senba1000m3"
               required={true}
             />
 
@@ -826,7 +826,7 @@ export const Recap = () => {
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all text-lg"
+                className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all text-lg"
               >
                 <option value="all">總覽（所有時間）</option>
                 {yearOptions.slice(1).map((year) => (

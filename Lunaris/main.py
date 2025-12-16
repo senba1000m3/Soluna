@@ -54,7 +54,26 @@ async def run_ingestion():
 
 @app.on_event("startup")
 async def on_startup():
+    logger.info("🚀 Starting Lunaris API...")
+    logger.info("📊 Initializing database...")
     init_db()
+    logger.info("✅ Database tables created/verified")
+
+    # 檢查 GlobalUser 和 QuickID 表是否存在
+    from sqlmodel import select
+
+    from models import GlobalUser, QuickID
+
+    with Session(engine) as session:
+        try:
+            global_user_count = len(session.exec(select(GlobalUser)).all())
+            quick_id_count = len(session.exec(select(QuickID)).all())
+            logger.info(
+                f"📈 Found {global_user_count} main users and {quick_id_count} quick IDs in database"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Could not check database contents: {e}")
+
     # Run ingestion in background without blocking startup
     asyncio.create_task(run_ingestion())
 
@@ -277,23 +296,9 @@ def login_global_user(
 
 @app.post("/global-user/logout")
 def logout_global_user(anilist_id: int, session: Session = Depends(get_session)):
-    """登出全局使用者 - 刪除主 ID 及其所有常用 ID"""
-    user = session.exec(
-        select(GlobalUser).where(GlobalUser.anilist_id == anilist_id)
-    ).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # 刪除所有常用 ID
-    quick_ids = session.exec(select(QuickID).where(QuickID.owner_id == user.id)).all()
-    for qid in quick_ids:
-        session.delete(qid)
-
-    # 刪除主 ID
-    session.delete(user)
-    session.commit()
-
+    """登出全局使用者 - 僅清除前端狀態，保留資料庫資料"""
+    # 只返回成功訊息，不刪除資料庫資料
+    # 資料保留在資料庫中，下次登入相同 ID 時會自動恢復
     return {"message": "Logged out successfully"}
 
 

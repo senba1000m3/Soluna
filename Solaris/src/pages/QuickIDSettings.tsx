@@ -216,7 +216,7 @@ export const QuickIDSettings = () => {
                 onChange={(e) => setNewAnilistUsername(e.target.value)}
                 required
                 className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
-                placeholder="例如: thet"
+                placeholder="例如：momoha100m3"
               />
               <p className="text-xs text-gray-500 mt-1">
                 系統會自動從 AniList 抓取 ID 和頭像
@@ -225,14 +225,14 @@ export const QuickIDSettings = () => {
 
             <div>
               <label className="block text-sm font-medium mb-2 text-gray-300">
-                自訂暱稱 (選填)
+                自訂暱稱（選填）
               </label>
               <input
                 type="text"
                 value={newNickname}
                 onChange={(e) => setNewNickname(e.target.value)}
                 className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
-                placeholder="例如: 朋友的帳號"
+                placeholder="例如：朋友的帳號"
               />
             </div>
 

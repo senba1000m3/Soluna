@@ -216,8 +216,8 @@ export const Timeline = () => {
                 setUsername(value);
                 if (!value) setIsDateLocked(false);
               }}
-              label="AniList ID (選填)"
-              placeholder="輸入 ID 以自動獲取生日 (例如: senba1000m3)"
+              label="AniList 使用者名稱（選填）"
+              placeholder="輸入使用者名稱客製化內容（例如: senba1000m3）"
               required={false}
             />
             {checkingUser && (

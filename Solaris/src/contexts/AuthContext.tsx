@@ -159,30 +159,15 @@ export const GlobalUserProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  // 登出使用者（清除主 ID 及所有常用 ID）
+  // 登出使用者（只清除前端狀態，保留資料庫資料）
   const logoutUser = async () => {
     if (!mainUser) return;
 
-    setLoading(true);
-    try {
-      // 從後端刪除
-      await axios.post(`${BACKEND_URL}/global-user/logout`, null, {
-        params: { anilist_id: mainUser.anilistId },
-      });
-
-      // 清除前端狀態
-      setMainUser(null);
-      setQuickIds([]);
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (error) {
-      console.error("Failed to logout:", error);
-      // 即使後端失敗也清除前端狀態
-      setMainUser(null);
-      setQuickIds([]);
-      localStorage.removeItem(STORAGE_KEY);
-    } finally {
-      setLoading(false);
-    }
+    // 只清除前端的 localStorage 和狀態
+    // 資料保留在資料庫中，下次登入相同 ID 時會自動恢復
+    setMainUser(null);
+    setQuickIds([]);
+    localStorage.removeItem(STORAGE_KEY);
   };
 
   // 新增常用 ID
