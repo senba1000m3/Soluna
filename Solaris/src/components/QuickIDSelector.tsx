@@ -153,6 +153,12 @@ export const QuickIDSelector: React.FC<QuickIDSelectorProps> = ({
       </div>
 
       {/* 當前選擇提示 */}
+      {!value && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-xs text-transparent ">尚未選擇</span>
+        </div>
+      )}
+
       {value && hasQuickOptions && (
         <div className="mt-2 flex items-center gap-2">
           {mainUser && value === mainUser.anilistUsername ? (

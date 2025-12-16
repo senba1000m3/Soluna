@@ -186,7 +186,7 @@ const fetchComparison = async (
  */
 const PageHeader: React.FC = () => (
   <div className="text-center mb-12">
-    <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-teal-400 text-transparent bg-clip-text flex items-center justify-center gap-3">
+    <h1 className="text-5xl font-bold mb-4 mt-5 bg-gradient-to-r from-blue-400 to-teal-400 text-transparent bg-clip-text flex items-center justify-center gap-3">
       <Users className="w-10 h-10 text-blue-400" />
       共鳴配對
     </h1>
@@ -222,7 +222,7 @@ const ComparisonForm: React.FC<{
         />
       </div>
 
-      <div className="flex items-center justify-center md:pt-6">
+      <div className="flex items-center justify-center md:pt-2">
         <div className="bg-gray-700 p-3 rounded-full">
           <Zap className="w-6 h-6 text-yellow-400 fill-yellow-400" />
         </div>
@@ -242,7 +242,7 @@ const ComparisonForm: React.FC<{
     <button
       type="submit"
       disabled={loading}
-      className="w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 rounded-lg font-bold text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
+      className="w-full px-6 py-4 mb-1 bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 rounded-lg font-bold text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
     >
       {loading ? (
         <>

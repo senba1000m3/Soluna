@@ -34,7 +34,7 @@ export const SeasonSelector: React.FC<SeasonSelectorProps> = ({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
-        <label className="block text-sm font-medium mb-2 text-gray-300">
+        <label className="block text-sm font-medium mb-1 text-gray-300">
           年份
           <span className="ml-2 text-xs text-purple-400">
             (下季: {nextSeason.year}{" "}
@@ -56,13 +56,13 @@ export const SeasonSelector: React.FC<SeasonSelectorProps> = ({
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-2 text-gray-300">
+        <label className="block text-sm font-medium mb-1 text-gray-300">
           季度
         </label>
         <select
           value={season}
           onChange={(e) => onSeasonChange(e.target.value)}
-          className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
+          className="w-full px-4 py-[9.4px] bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
         >
           {seasonOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>

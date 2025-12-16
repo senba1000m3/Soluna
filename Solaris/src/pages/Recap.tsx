@@ -793,7 +793,7 @@ export const Recap = () => {
 
       {/* Main Content */}
       <div className="text-center mb-12">
-        <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-purple-400 to-pink-600 text-transparent bg-clip-text">
+        <h1 className="text-5xl font-bold mb-4 mt-5 bg-gradient-to-r from-purple-400 to-pink-600 text-transparent bg-clip-text">
           動漫動態回顧
         </h1>
         <p className="text-gray-400 text-lg">

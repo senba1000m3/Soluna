@@ -138,7 +138,7 @@ export const DropPredict = () => {
   return (
     <div className="max-w-6xl mx-auto px-4">
       <div className="text-center mb-12">
-        <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-red-500 to-orange-500 text-transparent bg-clip-text flex items-center justify-center gap-3">
+        <h1 className="text-5xl font-bold mb-4 mt-5 bg-gradient-to-r from-red-500 to-orange-500 text-transparent bg-clip-text flex items-center justify-center gap-3">
           <AlertTriangle className="w-10 h-10 text-red-500" />
           棄番風險預測
         </h1>

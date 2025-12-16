@@ -124,7 +124,7 @@ export const Recommend = () => {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="text-center mb-12">
-        <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-purple-400 to-pink-600 text-transparent bg-clip-text">
+        <h1 className="text-5xl font-bold mb-4 mt-5 bg-gradient-to-r from-purple-400 to-pink-600 text-transparent bg-clip-text">
           新番推薦系統
         </h1>
         <p className="text-gray-400">基於你的喜好，推薦最適合的當季新番</p>
