@@ -69,8 +69,10 @@ export const GlobalUserProvider: React.FC<{ children: React.ReactNode }> = ({
       try {
         const user = JSON.parse(storedUser);
         setMainUser(user);
-        // 從後端載入常用 ID
-        loadQuickIds(user.anilistId);
+        // 從後端載入常用 ID (異步執行)
+        loadQuickIds(user.anilistId).catch((err) => {
+          console.error("Failed to load quick IDs on startup:", err);
+        });
       } catch (e) {
         console.error("Failed to parse stored user:", e);
         localStorage.removeItem(STORAGE_KEY);
@@ -118,12 +120,16 @@ export const GlobalUserProvider: React.FC<{ children: React.ReactNode }> = ({
   // 從後端載入常用 ID 列表
   const loadQuickIds = async (anilistId: number) => {
     try {
+      console.log(`Loading quick IDs for user ${anilistId}...`);
       const response = await axios.get(
         `${BACKEND_URL}/global-user/${anilistId}/quick-ids`,
       );
+      console.log(`Loaded ${response.data.length} quick IDs`);
       setQuickIds(response.data);
     } catch (error) {
       console.error("Failed to load quick IDs:", error);
+      // 即使失敗也設置為空數組，避免 undefined
+      setQuickIds([]);
     }
   };
 

@@ -319,13 +319,23 @@ class RecommendationEngine:
         - Radar chart data for genre overlap
         - Statistics comparison
         - Mutual recommendations
+
+        Note: DROPPED anime are excluded from all comparisons and recommendations.
         """
         # Basic compatibility score
         basic_comparison = self.compare_users(user1_profile, user2_profile)
 
-        # Extract anime IDs
-        user1_anime = {entry["media"]["id"]: entry for entry in user1_list}
-        user2_anime = {entry["media"]["id"]: entry for entry in user2_list}
+        # Extract anime IDs (excluding DROPPED)
+        user1_anime = {
+            entry["media"]["id"]: entry
+            for entry in user1_list
+            if entry.get("status") != "DROPPED"
+        }
+        user2_anime = {
+            entry["media"]["id"]: entry
+            for entry in user2_list
+            if entry.get("status") != "DROPPED"
+        }
 
         # Find common anime
         common_ids = set(user1_anime.keys()) & set(user2_anime.keys())
@@ -335,6 +345,11 @@ class RecommendationEngine:
         for anime_id in common_ids:
             entry1 = user1_anime[anime_id]
             entry2 = user2_anime[anime_id]
+
+            # Skip if either user dropped it (double-check in case filter missed it)
+            if entry1.get("status") == "DROPPED" or entry2.get("status") == "DROPPED":
+                continue
+
             score1 = self._normalize_score(entry1.get("score", 0))
             score2 = self._normalize_score(entry2.get("score", 0))
 
@@ -356,6 +371,8 @@ class RecommendationEngine:
                         entry1["media"].get("averageScore", 0)
                     ),
                     "both_rated": score1 > 0 and score2 > 0,
+                    "user1_status": entry1.get("status"),
+                    "user2_status": entry2.get("status"),
                 }
             )
 
@@ -383,6 +400,11 @@ class RecommendationEngine:
         recommend_to_user2 = []
         for anime_id in user1_only:
             entry = user1_anime[anime_id]
+
+            # Only recommend if user1 completed it
+            if entry.get("status") != "COMPLETED":
+                continue
+
             score = self._normalize_score(entry.get("score", 0))
             avg_score = self._normalize_score(entry["media"].get("averageScore", 0))
 
@@ -402,6 +424,11 @@ class RecommendationEngine:
         recommend_to_user1 = []
         for anime_id in user2_only:
             entry = user2_anime[anime_id]
+
+            # Only recommend if user2 completed it
+            if entry.get("status") != "COMPLETED":
+                continue
+
             score = self._normalize_score(entry.get("score", 0))
             avg_score = self._normalize_score(entry["media"].get("averageScore", 0))
 

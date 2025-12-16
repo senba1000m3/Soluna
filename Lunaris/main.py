@@ -1847,13 +1847,23 @@ async def get_user_recap(
                 achievements.append(
                     {
                         "id": "seasonal_champion",
+                        "title": "追番狂魔",
+                        "description": f"單季看了 {max_season} 部動漫",
+                        "icon": "📅",
+                        "tier": "diamond",
+                    }
+                )
+            elif max_season >= 20:
+                achievements.append(
+                    {
+                        "id": "seasonal_enthusiast",
                         "title": "追番冠軍",
                         "description": f"單季看了 {max_season} 部動漫",
                         "icon": "📅",
                         "tier": "gold",
                     }
                 )
-            elif max_season >= 20:
+            elif max_season >= 10:
                 achievements.append(
                     {
                         "id": "seasonal_enthusiast",
@@ -1863,7 +1873,7 @@ async def get_user_recap(
                         "tier": "silver",
                     }
                 )
-            elif max_season >= 10:
+            elif max_season >= 5:
                 achievements.append(
                     {
                         "id": "seasonal_fan",

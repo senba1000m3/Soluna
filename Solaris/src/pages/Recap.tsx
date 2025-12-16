@@ -496,7 +496,7 @@ export const Recap = () => {
       type: "final",
       content: (
         <div className="animate-fade-in px-4 h-full flex flex-col">
-          <h2 className="text-5xl font-bold mb-16 text-center bg-gradient-to-r from-purple-400 to-pink-600 text-transparent bg-clip-text">
+          <h2 className="text-5xl font-bold mb-6 text-center bg-gradient-to-r from-purple-400 to-pink-600 text-transparent bg-clip-text">
             你的年度回顧總覽
           </h2>
           <div className="flex-1 overflow-y-auto pr-2">
@@ -891,7 +891,7 @@ export const Recap = () => {
             <h3 className="text-3xl font-bold mb-6 text-center bg-gradient-to-r from-purple-400 to-pink-600 text-transparent bg-clip-text">
               你的年度回顧總覽
             </h3>
-            <div className="grid grid-cols-3 md:grid-cols-3 lg:grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 md:grid-cols-3 lg:grid-cols-3 gap-3">
               {/* Top Anime */}
               {recapData.top_anime.length > 0 && (
                 <div className="bg-gradient-to-br from-purple-600 to-purple-800 p-6 rounded-xl">
