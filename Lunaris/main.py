@@ -778,19 +778,18 @@ async def generate_timeline(request: TimelineRequest):
         # 4. Calculate Stats
         stats = rec_engine.calculate_timeline_stats(user_list)
 
-        # 5. Fetch birthday characters (if birth date provided)
-        birthday_chars = []
-        if request.birth_month and request.birth_day:
-            try:
-                birthday_chars = await anilist_client.get_characters_by_birthday(
-                    request.birth_month, request.birth_day
-                )
-                logger.info(
-                    f"Found {len(birthday_chars)} birthday characters for {request.birth_month}/{request.birth_day}"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to fetch birthday characters: {e}")
-                birthday_chars = []
+        # 5. Fetch anime from the user's birth year
+        birth_year_anime = []
+        try:
+            birth_year_anime = await anilist_client.get_anime_by_birth_year(
+                request.birth_year
+            )
+            logger.info(
+                f"Found {len(birth_year_anime)} anime from birth year {request.birth_year}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to fetch birth year anime: {e}")
+            birth_year_anime = []
 
         # 6. Build Chronological Data (Every year)
         chronological_data = []
@@ -827,7 +826,7 @@ async def generate_timeline(request: TimelineRequest):
             "chronological_data": chronological_data,
             "timeline_data": timeline_data,
             "stats": stats,
-            "birthday_characters": birthday_chars,
+            "birth_year_anime": birth_year_anime,
         }
 
     except Exception as e:

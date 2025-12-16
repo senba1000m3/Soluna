@@ -62,24 +62,24 @@ interface TimelineStats {
   };
 }
 
-interface BirthdayCharacter {
+interface BirthYearAnime {
   id: number;
-  name: {
-    full: string;
-    native: string;
+  title: {
+    romaji: string;
+    english: string | null;
   };
-  image: {
+  coverImage: {
     large: string;
   };
-  favourites: number;
-  media: {
-    nodes: {
-      title: {
-        romaji: string;
-        english: string | null;
-      };
-    }[];
+  startDate: {
+    year: number;
+    month: number;
+    day: number;
   };
+  averageScore: number;
+  popularity: number;
+  seasonYear: number;
+  format: string;
 }
 
 interface TimelineResponse {
@@ -88,7 +88,7 @@ interface TimelineResponse {
   timeline_data: TimelineMilestone[];
   chronological_data: ChronologicalEntry[];
   stats?: TimelineStats;
-  birthday_characters?: BirthdayCharacter[];
+  birth_year_anime?: BirthYearAnime[];
 }
 
 export const Timeline = () => {
@@ -452,11 +452,11 @@ export const Timeline = () => {
         result.chronological_data &&
         result.chronological_data.length > 0 && (
           <div className="space-y-16 pb-20">
-            {/* Stats & Birthday Section */}
+            {/* Stats & Birth Year Anime Section */}
             {(result.stats ||
-              (result.birthday_characters &&
-                result.birthday_characters.length > 0)) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              (result.birth_year_anime &&
+                result.birth_year_anime.length > 0)) && (
+              <div className="grid grid-cols-[1fr_2fr] md:grid-cols-[1fr_2fr] gap-8">
                 {/* Stats */}
                 {result.stats && Object.keys(result.stats).length > 0 && (
                   <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
@@ -514,39 +514,38 @@ export const Timeline = () => {
                   </div>
                 )}
 
-                {/* Birthday Characters */}
-                {result.birthday_characters &&
-                  result.birthday_characters.length > 0 && (
+                {/* Birth Year Anime */}
+                {result.birth_year_anime &&
+                  result.birth_year_anime.length > 0 && (
                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
                       <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2 border-b border-gray-700 pb-3">
-                        <Cake className="w-5 h-5 text-pink-500" />
-                        與你同天生日的角色
+                        <Star className="w-5 h-5 text-amber-500" />
+                        你出生那年的霸權動畫
                       </h3>
-                      <div className="grid grid-cols-3 gap-4">
-                        {result.birthday_characters.map((char) => (
+                      <div className="grid grid-cols-5 gap-4">
+                        {result.birth_year_anime.slice(0, 10).map((anime) => (
                           <div
-                            key={char.id}
+                            key={anime.id}
                             className="text-center group cursor-pointer"
                             onClick={() =>
                               window.open(
-                                `https://anilist.co/character/${char.id}`,
+                                `https://anilist.co/anime/${anime.id}`,
                                 "_blank",
                               )
                             }
                           >
-                            <div className="w-20 h-20 mx-auto rounded-full overflow-hidden border-2 border-gray-600 group-hover:border-pink-500 transition-colors mb-2 shadow-md">
+                            <div className="relative mb-2 overflow-hidden rounded-lg">
                               <img
-                                src={char.image.large}
-                                alt={char.name.full}
-                                className="w-full h-full object-cover"
+                                src={anime.coverImage.large}
+                                alt={anime.title.romaji}
+                                className="w-full aspect-[3/4] object-cover group-hover:scale-110 transition-transform duration-300"
                               />
                             </div>
-                            <p className="text-xs text-white font-medium truncate px-1">
-                              {char.name.full}
+                            <p className="text-xs text-white font-medium line-clamp-2">
+                              {anime.title.english || anime.title.romaji}
                             </p>
-                            <p className="text-[10px] text-gray-500 truncate px-1">
-                              {char.media.nodes[0]?.title.english ||
-                                char.media.nodes[0]?.title.romaji}
+                            <p className="text-xs text-gray-400">
+                              {anime.seasonYear || anime.startDate?.year}年
                             </p>
                           </div>
                         ))}

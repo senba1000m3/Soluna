@@ -1,8 +1,8 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 import httpx
 from sqlmodel import Session, select
@@ -540,7 +540,52 @@ class AniListClient:
             )
             return []
 
-    async def get_anime_voice_actors(self, anime_id: int, cache_expiry_days: int = 30) -> Dict[str, Any]:
+    async def get_anime_by_birth_year(self, year: int) -> List[Dict[str, Any]]:
+        """
+        Fetches top anime from the user's birth year.
+        Returns up to 10 anime sorted by popularity.
+        """
+        query = """
+        query ($year: Int) {
+          Page(page: 1, perPage: 10) {
+            media(
+              type: ANIME,
+              seasonYear: $year,
+              sort: POPULARITY_DESC
+            ) {
+              id
+              title {
+                romaji
+                english
+              }
+              coverImage {
+                large
+              }
+              startDate {
+                year
+                month
+                day
+              }
+              averageScore
+              popularity
+              seasonYear
+              format
+            }
+          }
+        }
+        """
+
+        try:
+            variables = {"year": year}
+            data = await self._post_request(query, variables)
+            return data["Page"]["media"]
+        except Exception as e:
+            logger.error(f"Failed to fetch anime for birth year {year}: {e}")
+            return []
+
+    async def get_anime_voice_actors(
+        self, anime_id: int, cache_expiry_days: int = 30
+    ) -> Dict[str, Any]:
         """
         Fetches voice actor data for a specific anime with caching support.
 
@@ -563,12 +608,18 @@ class AniListClient:
                     # 檢查快取是否過期
                     cache_age = datetime.utcnow() - cache_entry.cached_at
                     if cache_age.days < cache_expiry_days:
-                        print(f"💾 [AniList Client] 使用快取資料: 動漫 {anime_id} (快取時間: {cache_entry.cached_at})")
+                        print(
+                            f"💾 [AniList Client] 使用快取資料: 動漫 {anime_id} (快取時間: {cache_entry.cached_at})"
+                        )
                         logger.info(f"Using cached voice actors for anime {anime_id}")
                         return json.loads(cache_entry.voice_actors_data)
                     else:
-                        print(f"⏰ [AniList Client] 快取已過期 ({cache_age.days} 天)，重新抓取...")
-                        logger.info(f"Cache expired for anime {anime_id}, refetching...")
+                        print(
+                            f"⏰ [AniList Client] 快取已過期 ({cache_age.days} 天)，重新抓取..."
+                        )
+                        logger.info(
+                            f"Cache expired for anime {anime_id}, refetching..."
+                        )
             except Exception as e:
                 print(f"⚠️ [AniList Client] 讀取快取失敗: {str(e)}")
                 logger.warning(f"Failed to read cache for anime {anime_id}: {e}")
@@ -630,15 +681,19 @@ class AniListClient:
 
                         if existing_cache:
                             # 更新現有快取
-                            existing_cache.voice_actors_data = json.dumps(data["Media"], ensure_ascii=False)
+                            existing_cache.voice_actors_data = json.dumps(
+                                data["Media"], ensure_ascii=False
+                            )
                             existing_cache.cached_at = datetime.utcnow()
                             print(f"🔄 [AniList Client] 更新快取: 動漫 {anime_id}")
                         else:
                             # 新增快取
                             cache_entry = AnimeVoiceActorCache(
                                 anime_id=anime_id,
-                                voice_actors_data=json.dumps(data["Media"], ensure_ascii=False),
-                                cached_at=datetime.utcnow()
+                                voice_actors_data=json.dumps(
+                                    data["Media"], ensure_ascii=False
+                                ),
+                                cached_at=datetime.utcnow(),
                             )
                             self.db_session.add(cache_entry)
                             print(f"💾 [AniList Client] 儲存快取: 動漫 {anime_id}")
@@ -648,7 +703,9 @@ class AniListClient:
                     except Exception as e:
                         self.db_session.rollback()
                         print(f"⚠️ [AniList Client] 快取儲存失敗: {str(e)}")
-                        logger.warning(f"Failed to cache voice actors for anime {anime_id}: {e}")
+                        logger.warning(
+                            f"Failed to cache voice actors for anime {anime_id}: {e}"
+                        )
 
                 return data["Media"]
             else:
