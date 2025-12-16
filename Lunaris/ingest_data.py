@@ -48,11 +48,16 @@ async def fetch_and_store_anime(session: Session, year: int, season: str):
     logger.info(f"Stored {len(anime_list)} anime records.")
 
 
-async def fetch_and_store_user_data(session: Session, username: str):
+async def fetch_and_store_user_data(
+    session: Session, username: str, progress_tracker=None
+):
     """
     Fetches a user's list and stores it as ratings.
     """
     logger.info(f"Fetching list for user: {username}...")
+
+    if progress_tracker:
+        progress_tracker.update(progress=10, message="正在抓取使用者資料...")
 
     try:
         # 1. Get or Create User
@@ -76,15 +81,30 @@ async def fetch_and_store_user_data(session: Session, username: str):
 
     # 2. Fetch Anime List
     try:
+        if progress_tracker:
+            progress_tracker.update(progress=12, message="正在抓取動漫清單...")
+
         entries = await anilist_client.get_user_anime_list(username)
         if not entries:
             logger.warning(f"No anime list found for user {username}")
             return
+
+        if progress_tracker:
+            progress_tracker.update(
+                progress=15, message=f"抓取到 {len(entries)} 筆動漫記錄"
+            )
     except Exception as e:
         logger.error(f"Error fetching anime list for {username}: {e}")
         raise
 
     new_ratings_count = 0
+    commit_batch_size = 50  # 每 50 筆 commit 一次
+    processed_count = 0
+    total_entries = len(entries)
+
+    if progress_tracker:
+        progress_tracker.update(progress=18, message="開始儲存動漫資料...")
+
     for entry in entries:
         try:
             media = entry.get("media")
@@ -119,8 +139,6 @@ async def fetch_and_store_user_data(session: Session, username: str):
                     tags=",".join([t["name"] for t in (media.get("tags") or [])]),
                 )
                 session.add(anime)
-                # Commit immediately to satisfy foreign key constraint for rating
-                session.commit()
 
             # Check if rating exists and update or create
             statement = select(UserRating).where(
@@ -145,14 +163,40 @@ async def fetch_and_store_user_data(session: Session, username: str):
                 )
                 session.add(rating)
                 new_ratings_count += 1
+
+            processed_count += 1
+
+            # 批次 commit 以提升性能
+            if processed_count % commit_batch_size == 0:
+                session.commit()
+                logger.info(f"已處理 {processed_count}/{total_entries} 筆記錄")
+
+                # 更新進度：18% ~ 28%
+                if progress_tracker:
+                    progress_percentage = 18 + int(
+                        (processed_count / total_entries) * 10
+                    )
+                    progress_tracker.update(
+                        progress=progress_percentage,
+                        message=f"儲存中... ({processed_count}/{total_entries})",
+                    )
+
         except Exception as e:
             logger.error(f"Error processing entry for anime {anime_id}: {e}")
             continue
 
+    # 最終 commit 確保所有剩餘數據都被保存
     session.commit()
+    logger.info(f"完成處理 {processed_count} 筆記錄，新增 {new_ratings_count} 筆評分")
+
+    if progress_tracker:
+        progress_tracker.update(
+            progress=30, message=f"資料儲存完成！共 {processed_count} 筆記錄"
+        )
+
     logger.info(
         f"Updated {username}'s list: {new_ratings_count} new ratings, "
-        f"{len(entries) - new_ratings_count} updated ratings."
+        f"{total_entries - new_ratings_count} updated ratings."
     )
 
 

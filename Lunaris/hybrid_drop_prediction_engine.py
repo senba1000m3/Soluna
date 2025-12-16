@@ -133,6 +133,14 @@ class HybridDropPredictionEngine:
 
         if self.bert_recommender is None:
             try:
+                if self.progress_tracker:
+                    self.progress_tracker.update(
+                        progress=72,
+                        message="初始化 BERT 模型 (20% 權重)...",
+                    )
+
+                logger.info("Initializing BERT recommender...")
+
                 from bert_model.bert_recommender_optimized import (
                     OptimizedBERTRecommender,
                 )
@@ -143,12 +151,25 @@ class HybridDropPredictionEngine:
                     db_session=session,
                     device="auto",
                 )
+
+                if self.progress_tracker:
+                    self.progress_tracker.update(
+                        progress=74,
+                        message="BERT 模型初始化完成",
+                    )
+
                 logger.info("✅ BERT recommender initialized successfully")
             except Exception as e:
                 logger.error(f"❌ Failed to initialize BERT recommender: {e}")
                 logger.exception(e)
                 self.use_bert = False
                 self.bert_recommender = None
+
+                if self.progress_tracker:
+                    self.progress_tracker.update(
+                        progress=74,
+                        message="BERT 初始化失敗，使用純 XGBoost 模式",
+                    )
 
     def _get_user_sequence(self, user_id: int, session: Session) -> List[int]:
         """
@@ -200,16 +221,36 @@ class HybridDropPredictionEngine:
 
         try:
             # 使用 BERT 推薦器預測
-            # get_recommendations 返回推薦的動畫及其分數
-            recommendations = self.bert_recommender.get_recommendations(
-                user_sequence=user_sequence, top_k=100, session=session
-            )
+            # get_recommendations 返回推薦的動畫列表
+            # 使用 timeout 防止卡住（跨平台方案）
+            import concurrent.futures
+            import threading
+
+            def get_bert_recommendations():
+                return self.bert_recommender.get_recommendations(
+                    user_anime_ids=user_sequence,
+                    top_k=100,
+                    use_anilist_ids=True,
+                    force_refresh=False,
+                )
+
+            # 使用 ThreadPoolExecutor 實現跨平台超時
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(get_bert_recommendations)
+                try:
+                    recommendations = future.result(timeout=10.0)  # 10 秒超時
+                except concurrent.futures.TimeoutError:
+                    logger.warning(f"BERT prediction timeout for anime {anime_id}")
+                    return 0.5  # 超時時返回中性值
 
             # 檢查該動畫是否在推薦列表中
+            # recommendations 是 List[Dict[str, Any]] 格式
             bert_score = 0.0
-            for rec_anime_id, score in recommendations:
+            for rec in recommendations:
+                rec_anime_id = rec.get("id") or rec.get("anime_id")
+                rec_score = rec.get("score", 0.0)
                 if rec_anime_id == anime_id:
-                    bert_score = score
+                    bert_score = rec_score
                     break
 
             # 如果不在推薦列表中，給予低分 (高棄番風險)

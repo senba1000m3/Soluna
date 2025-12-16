@@ -415,9 +415,23 @@ def update_quick_id_nickname(
 async def stream_progress(task_id: str):
     """
     SSE endpoint to stream progress updates for a specific task
+    Waits up to 5 seconds for task to be created if not found immediately
     """
+    import asyncio
+
+    # Wait for task to be created (max 5 seconds)
     tracker = progress_manager.get_task(task_id)
     if not tracker:
+        logger.info(f"Task {task_id} not found, waiting for creation...")
+        for i in range(50):  # 50 * 0.1 = 5 seconds
+            await asyncio.sleep(0.1)
+            tracker = progress_manager.get_task(task_id)
+            if tracker:
+                logger.info(f"Task {task_id} found after {(i + 1) * 0.1:.1f}s")
+                break
+
+    if not tracker:
+        logger.error(f"Task {task_id} not found after 5 seconds")
         raise HTTPException(status_code=404, detail="Task not found")
 
     async def event_generator():
@@ -440,7 +454,6 @@ async def stream_progress(task_id: str):
             "X-Accel-Buffering": "no",
         },
     )
-    return {"status": "ok"}
 
 
 @app.post("/users", response_model=User)
@@ -844,12 +857,22 @@ async def analyze_drops(
     """
     Fetches user's dropped list, stores data, trains model, and returns analysis.
     Now includes predictions for watching/planning anime and drop pattern statistics.
-    Supports real-time progress tracking via SSE.
+    Progress tracking is optional (only if task_id is provided).
     """
-    # Create progress tracker
-    task_id = request.task_id or str(uuid.uuid4())
-    tracker = progress_manager.create_task(task_id)
-    tracker.update(progress=0, stage="init", status="running", message="開始分析...")
+    # Create progress tracker only if task_id is provided
+    tracker = None
+    if request.task_id:
+        task_id = request.task_id
+        # Clean up old task if exists
+        existing_task = progress_manager.get_task(task_id)
+        if existing_task:
+            logger.info(f"Removing existing task: {task_id}")
+            progress_manager.remove_task(task_id)
+
+        tracker = progress_manager.create_task(task_id)
+        tracker.update(
+            progress=0, stage="init", status="running", message="開始分析..."
+        )
 
     try:
         # Import needed models at function start
@@ -860,15 +883,18 @@ async def analyze_drops(
         from models import UserRating
 
         logger.info(f"Starting drop analysis for user: {request.username}")
-        tracker.update(progress=2, message=f"開始分析使用者: {request.username}")
+        if tracker:
+            tracker.update(progress=2, message=f"開始分析使用者: {request.username}")
 
         # Check if user exists first
         logger.info(f"Checking if user {request.username} exists on AniList...")
-        tracker.update(progress=5, message="檢查使用者是否存在...")
+        if tracker:
+            tracker.update(progress=5, message="檢查使用者是否存在...")
         profile = await anilist_client.get_user_profile(request.username)
         if not profile:
             logger.error(f"User {request.username} not found on AniList")
-            tracker.error(f"使用者 {request.username} 不存在")
+            if tracker:
+                tracker.error(f"使用者 {request.username} 不存在")
             raise HTTPException(
                 status_code=404,
                 detail=f"User '{request.username}' not found on AniList. Please check the username.",
@@ -878,68 +904,111 @@ async def analyze_drops(
 
         # 1. Fetch and Store User Data (Ingest)
         logger.info(f"Fetching and storing anime list for {request.username}...")
-        tracker.update(progress=10, stage="fetch_data", message="正在抓取動漫列表...")
+        if tracker:
+            tracker.update(
+                progress=10, stage="fetch_data", message="正在抓取動漫列表..."
+            )
         try:
-            await fetch_and_store_user_data(session, request.username)
+            await fetch_and_store_user_data(
+                session, request.username, progress_tracker=tracker
+            )
             logger.info("User data stored successfully")
-            tracker.update(progress=30, message="動漫列表已儲存")
+            # 進度已在 fetch_and_store_user_data 中更新到 30%
         except Exception as e:
             logger.error(f"Error fetching/storing user data: {e}")
-            tracker.error(f"抓取資料失敗: {str(e)}")
+            if tracker:
+                tracker.error(f"抓取資料失敗: {str(e)}")
             raise HTTPException(
                 status_code=500, detail=f"Failed to fetch anime list: {str(e)}"
             )
 
         # 2. Train personalized model for this user
         logger.info("Training personalized drop prediction model...")
-        tracker.update(progress=35, stage="train_model", message="開始訓練模型...")
+        if tracker:
+            tracker.update(progress=35, stage="train_model", message="開始訓練模型...")
         try:
             # Get user ID for personalized training
+            if tracker:
+                tracker.update(progress=37, message="查詢使用者資料...")
             db_user = session.exec(
                 select(UserModel).where(UserModel.username == request.username)
             ).first()
 
             if not db_user:
-                tracker.error("資料庫中找不到使用者")
+                if tracker:
+                    tracker.error("資料庫中找不到使用者")
                 raise HTTPException(
                     status_code=404, detail="User not found in database"
                 )
 
             # Create hybrid drop prediction engine with progress tracker
-            # BERT (80%) + XGBoost (20%)
+            # XGBoost (80%) + BERT (20%)
+            if tracker:
+                tracker.update(progress=40, message="初始化混合預測引擎...")
+            logger.info("Initializing hybrid drop prediction engine...")
+
             hybrid_drop_engine = HybridDropPredictionEngine(
                 bert_model_path="bert_model/trained_models/best_model.pth",
                 bert_dataset_path="bert_model/trained_models/item_mappings.pkl",
                 bert_db_path="bert_model/bert.db",
-                bert_weight=0.8,
-                xgboost_weight=0.2,
+                bert_weight=0.2,
+                xgboost_weight=0.8,
                 use_bert=True,
                 progress_tracker=tracker,
             )
 
-            # Train XGBoost component
+            if tracker:
+                tracker.update(progress=45, message="引擎初始化完成，開始訓練...")
+            logger.info("Engine initialized, starting XGBoost training...")
+
+            # Train XGBoost component (will update progress from 45% to 70%)
             train_result = hybrid_drop_engine.train_xgboost_model(
                 session, user_id=db_user.id
             )
+
+            if tracker:
+                tracker.update(progress=72, message="模型訓練完成")
             logger.info(f"Hybrid model training complete: {train_result}")
 
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Error training model: {e}")
-            tracker.error(f"訓練模型失敗: {str(e)}")
+            logger.error(f"Error training model: {e}", exc_info=True)
+            if tracker:
+                tracker.error(f"訓練模型失敗: {str(e)}")
             raise HTTPException(
                 status_code=500, detail=f"Failed to train model: {str(e)}"
             )
 
         # 3. Get User's List and categorize
         logger.info("Fetching and analyzing user's anime list...")
-        tracker.update(progress=90, stage="analyze", message="分析動漫列表...")
+        if tracker:
+            tracker.update(progress=75, stage="analyze", message="重新抓取動漫列表...")
         try:
             user_list = await anilist_client.get_user_anime_list(request.username)
+
+            if tracker:
+                tracker.update(
+                    progress=78, message=f"分析 {len(user_list)} 筆動漫記錄..."
+                )
+
             dropped_list = []
             watching_list = []
             planning_list = []
 
+            total_entries = len(user_list)
+            processed = 0
+
             for entry in user_list:
+                processed += 1
+
+                # Update progress every 10% of entries
+                if tracker and processed % max(1, total_entries // 10) == 0:
+                    progress_pct = 78 + int((processed / total_entries) * 10)
+                    tracker.update(
+                        progress=progress_pct,
+                        message=f"分析中... ({processed}/{total_entries})",
+                    )
                 status = entry.get("status", "").upper()
                 media = entry.get("media", {})
                 anime_id = media.get("id")
@@ -993,6 +1062,8 @@ async def analyze_drops(
                         planning_list.append(base_info)
 
             # Sort by drop probability (highest first)
+            if tracker:
+                tracker.update(progress=88, message="排序預測結果...")
             watching_list.sort(
                 key=lambda x: x.get("drop_probability") or 0, reverse=True
             )
@@ -1003,25 +1074,37 @@ async def analyze_drops(
             logger.info(
                 f"Found {len(dropped_list)} dropped, {len(watching_list)} watching, {len(planning_list)} planning"
             )
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Error processing anime list: {e}")
+            logger.error(f"Error processing anime list: {e}", exc_info=True)
+            if tracker:
+                tracker.error(f"分析動漫列表失敗: {str(e)}")
             raise HTTPException(
                 status_code=500, detail=f"Failed to process anime list: {str(e)}"
             )
 
         # 4. Analyze drop patterns
         logger.info("Analyzing drop patterns...")
+        if tracker:
+            tracker.update(progress=92, message="分析棄番模式...")
         try:
             ratings = session.exec(select(UserRating)).all()
             animes = session.exec(select(AnimeModel)).all()
+
+            if tracker:
+                tracker.update(progress=95, message="統計棄番特徵...")
             drop_patterns = hybrid_drop_engine.analyze_drop_patterns(ratings, animes)
 
             # Get model info for response
             model_info = hybrid_drop_engine.get_model_info()
             logger.info(f"Drop analysis complete! Model info: {model_info}")
-            tracker.complete(message="分析完成！")
+
+            if tracker:
+                tracker.update(progress=98, message="準備回傳結果...")
+                tracker.complete(message="分析完成！")
         except Exception as e:
-            logger.error(f"Error analyzing drop patterns: {e}")
+            logger.error(f"Error analyzing drop patterns: {e}", exc_info=True)
             drop_patterns = {
                 "top_dropped_tags": [],
                 "top_dropped_genres": [],
@@ -1029,7 +1112,6 @@ async def analyze_drops(
             }
 
         return {
-            "task_id": task_id,
             "username": request.username,
             "dropped_count": len(dropped_list),
             "dropped_list": dropped_list,
@@ -1038,20 +1120,35 @@ async def analyze_drops(
             "model_metrics": {
                 **train_result,
                 "model_type": "hybrid",
-                "bert_weight": 0.8,
-                "xgboost_weight": 0.2,
+                "bert_weight": 0.2,
+                "xgboost_weight": 0.8,
             },
             "drop_patterns": drop_patterns,
         }
-    except HTTPException:
-        tracker.error("發生錯誤")
+    except HTTPException as he:
+        # HTTPException already has error tracking
         raise
     except Exception as e:
         logger.error(f"Unexpected error in analyze_drops: {e}", exc_info=True)
-        tracker.error(f"發生錯誤: {str(e)}")
+        if tracker:
+            tracker.error(f"發生錯誤: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"An unexpected error occurred: {str(e)}"
         )
+    finally:
+        # Ensure task is eventually cleaned up (after some time)
+        # This prevents memory leaks from abandoned connections
+        if tracker and request.task_id:
+            import threading
+
+            def cleanup_task():
+                import time
+
+                time.sleep(300)  # Wait 5 minutes before cleanup
+                progress_manager.remove_task(request.task_id)
+                logger.info(f"Cleaned up task: {request.task_id}")
+
+            threading.Thread(target=cleanup_task, daemon=True).start()
 
 
 @app.post("/recap")

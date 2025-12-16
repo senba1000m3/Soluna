@@ -1,6 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
-import { ProgressMonitor } from "../components/ProgressMonitor";
 import {
   AnalysisForm,
   AnimeDetailModal,
@@ -31,8 +30,19 @@ export const DropPredict = () => {
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [error, setError] = useState("");
   const [modalAnime, setModalAnime] = useState<AnimeItem | null>(null);
-  const [taskId, setTaskId] = useState<string>("");
-  const [showProgress, setShowProgress] = useState(false);
+
+  // Use ref to track current request
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const currentTaskIdRef = useRef<string>("");
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,17 +51,24 @@ export const DropPredict = () => {
       return;
     }
 
+    // **Abort previous request if exists**
+    if (abortControllerRef.current) {
+      console.log("Aborting previous request...");
+      abortControllerRef.current.abort();
+    }
+
+    // Create new abort controller for this request
+    abortControllerRef.current = new AbortController();
+
     // Clear previous results and errors before starting new analysis
     setLoading(true);
     setError("");
     setResult(null);
-    setShowProgress(true);
 
-    // Generate a task ID
-    const newTaskId = `drop_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    setTaskId(newTaskId);
+    console.log(`Starting analysis for user: ${username.trim()}`);
 
     try {
+      // Send the analyze request (without task_id, no progress tracking)
       const response = await fetch(`${BACKEND_URL}/analyze_drops`, {
         method: "POST",
         headers: {
@@ -59,35 +76,30 @@ export const DropPredict = () => {
         },
         body: JSON.stringify({
           username: username.trim(),
-          task_id: newTaskId,
         }),
+        signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
-        throw new Error("分析請求失敗，請確認 ID 是否正確");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "分析請求失敗，請確認 ID 是否正確");
       }
 
       const data: AnalyzeResponse = await response.json();
       setResult(data);
+      console.log(`Analysis completed successfully`);
     } catch (err: any) {
+      // Ignore abort errors
+      if (err.name === "AbortError") {
+        console.log("Request was aborted");
+        return;
+      }
+
       console.error(err);
       setError(err.message || "發生錯誤，請稍後再試");
-      setShowProgress(false);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleProgressComplete = () => {
-    console.log("Progress completed");
-    setShowProgress(false);
-  };
-
-  const handleProgressError = (error: string) => {
-    console.error("Progress error:", error);
-    setError(error);
-    setShowProgress(false);
-    setLoading(false);
   };
 
   return (
@@ -109,18 +121,7 @@ export const DropPredict = () => {
         loading={loading}
       />
 
-      {/* Progress Monitor */}
-      {showProgress && taskId && (
-        <div className="mb-8 max-w-2xl mx-auto">
-          <ProgressMonitor
-            taskId={taskId}
-            onComplete={handleProgressComplete}
-            onError={handleProgressError}
-          />
-        </div>
-      )}
-
-      {error && !showProgress && (
+      {error && (
         <div className="text-center text-red-400 mb-8 bg-red-900/20 p-4 rounded-lg border border-red-800 max-w-2xl mx-auto">
           {error}
         </div>

@@ -39,12 +39,26 @@ export const ProgressMonitor: React.FC<ProgressMonitorProps> = ({
   useEffect(() => {
     if (!taskId) return;
 
+    // Reset state for new task
+    setProgress(null);
+    setError("");
+    setIsConnected(false);
+
+    // Close previous connection if exists
+    if (eventSourceRef.current) {
+      console.log("Closing previous SSE connection");
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    console.log(`Opening SSE connection for task: ${taskId}`);
+
     // Connect to SSE endpoint
     const eventSource = new EventSource(`${BACKEND_URL}/progress/${taskId}`);
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
-      console.log("SSE connection opened");
+      console.log("SSE connection opened for task:", taskId);
       setIsConnected(true);
     };
 
@@ -56,6 +70,7 @@ export const ProgressMonitor: React.FC<ProgressMonitorProps> = ({
 
         // Handle completion
         if (data.status === "completed") {
+          console.log("Task completed:", taskId);
           if (onComplete) {
             onComplete(data);
           }
@@ -63,6 +78,7 @@ export const ProgressMonitor: React.FC<ProgressMonitorProps> = ({
           // Auto close after delay if enabled
           if (autoClose) {
             autoCloseTimerRef.current = setTimeout(() => {
+              console.log("Auto-closing SSE connection");
               eventSource.close();
             }, autoCloseDelay);
           }
@@ -70,6 +86,7 @@ export const ProgressMonitor: React.FC<ProgressMonitorProps> = ({
 
         // Handle error
         if (data.status === "error") {
+          console.error("Task error:", data.message);
           setError(data.message || "發生錯誤");
           if (onError) {
             onError(data.message || "Unknown error");
@@ -81,18 +98,27 @@ export const ProgressMonitor: React.FC<ProgressMonitorProps> = ({
     };
 
     eventSource.onerror = (err) => {
-      console.error("SSE error:", err);
+      console.error("SSE error for task:", taskId, err);
       setIsConnected(false);
-      setError("連線中斷");
+
+      // Only show connection error if we haven't received any progress yet
+      if (!progress) {
+        setError("連線失敗，請重試");
+      }
+
       eventSource.close();
     };
 
     // Cleanup
     return () => {
+      console.log("Cleaning up SSE connection for task:", taskId);
       if (autoCloseTimerRef.current) {
         clearTimeout(autoCloseTimerRef.current);
       }
-      eventSource.close();
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
     };
   }, [taskId, onComplete, onError, autoClose, autoCloseDelay]);
 
@@ -152,9 +178,7 @@ export const ProgressMonitor: React.FC<ProgressMonitorProps> = ({
           {getStatusIcon()}
           <div>
             <h3 className="font-semibold text-lg text-white">
-              {progress.stage
-                ? getStageLabel(progress.stage)
-                : "處理中"}
+              {progress.stage ? getStageLabel(progress.stage) : "處理中"}
             </h3>
             <p className="text-sm text-gray-400">
               {isConnected ? "即時更新" : "連線中斷"}

@@ -141,7 +141,7 @@ class DropAnalysisEngine:
         # Get all ratings (optionally filtered by user)
         if self.progress_tracker:
             self.progress_tracker.update(
-                progress=5, stage="prepare_features", message="正在準備特徵數據..."
+                progress=42, stage="prepare_features", message="正在準備特徵數據..."
             )
         logger.info("📊 正在準備特徵數據...")
         if user_id:
@@ -158,7 +158,9 @@ class DropAnalysisEngine:
         rows = []
         logger.info(f"正在處理 {len(ratings)} 筆評分記錄...")
         total_ratings = len(ratings)
-        for idx, rating in enumerate(tqdm(ratings, desc="特徵提取", unit="筆")):
+        processed_count = 0
+
+        for idx, rating in enumerate(ratings):
             # Skip non-terminal states for training
             if rating.status not in ["DROPPED", "COMPLETED"]:
                 continue
@@ -187,12 +189,16 @@ class DropAnalysisEngine:
             }
 
             rows.append(row)
+            processed_count += 1
 
-            # Update progress every 10 items
-            if self.progress_tracker and idx % 10 == 0:
-                progress = 5 + int((idx / total_ratings) * 10)
+            # Update progress more frequently (every 5 items or every 10%)
+            if self.progress_tracker and (
+                processed_count % 5 == 0 or idx % max(1, total_ratings // 10) == 0
+            ):
+                progress = 42 + int((idx / max(total_ratings, 1)) * 8)
                 self.progress_tracker.update(
-                    progress=progress, message=f"特徵提取: {idx}/{total_ratings}"
+                    progress=min(progress, 49),
+                    message=f"特徵提取: {processed_count}/{total_ratings}",
                 )
 
         df = pd.DataFrame(rows)
@@ -202,7 +208,7 @@ class DropAnalysisEngine:
 
         # Encode categorical features
         if self.progress_tracker:
-            self.progress_tracker.update(progress=15, message="正在編碼類別特徵...")
+            self.progress_tracker.update(progress=50, message="正在編碼類別特徵...")
         logger.info("🔧 正在編碼類別特徵...")
 
         # Genres (multi-label)
@@ -214,7 +220,7 @@ class DropAnalysisEngine:
 
         # Tags (multi-label, limit to top 30 most common)
         if self.progress_tracker:
-            self.progress_tracker.update(progress=18, message="處理標籤 (Tags)...")
+            self.progress_tracker.update(progress=52, message="處理標籤 (Tags)...")
         print("  ├─ 處理標籤 (Tags)...")
         tag_lists = df["tags"].tolist()
         tags_encoded = self.mlb_tags.fit_transform(tag_lists)
@@ -227,14 +233,14 @@ class DropAnalysisEngine:
         # Studio (label encoding)
         if self.progress_tracker:
             self.progress_tracker.update(
-                progress=20, message="處理製作公司 (Studios)..."
+                progress=54, message="處理製作公司 (Studios)..."
             )
         print("  ├─ 處理製作公司 (Studios)...")
         df["studio_code"] = self.le_studio.fit_transform(df["studio"])
 
         # Season (one-hot)
         if self.progress_tracker:
-            self.progress_tracker.update(progress=22, message="處理季節 (Seasons)...")
+            self.progress_tracker.update(progress=56, message="處理季節 (Seasons)...")
         print("  └─ 處理季節 (Seasons)...")
         df = pd.get_dummies(df, columns=["season"], prefix="Season")
 
@@ -243,7 +249,7 @@ class DropAnalysisEngine:
 
         if self.progress_tracker:
             self.progress_tracker.update(
-                progress=25,
+                progress=58,
                 message=f"特徵準備完成！共 {len(df)} 筆樣本，{len(df.columns) - 2} 個特徵",
             )
         logger.info(
@@ -263,7 +269,7 @@ class DropAnalysisEngine:
         print("=" * 60)
         if self.progress_tracker:
             self.progress_tracker.update(
-                progress=0,
+                progress=35,
                 stage="training",
                 status="running",
                 message="開始模型訓練...",
@@ -275,7 +281,7 @@ class DropAnalysisEngine:
             print("\n📋 階段 1/4: 準備訓練數據")
             if self.progress_tracker:
                 self.progress_tracker.update(
-                    progress=5, stage="stage_1", message="準備訓練數據"
+                    progress=40, stage="stage_1", message="準備訓練數據"
                 )
             df = self._prepare_features(session, user_id=user_id)
 
@@ -292,7 +298,7 @@ class DropAnalysisEngine:
             print("\n📋 階段 2/4: 分離特徵與標籤")
             if self.progress_tracker:
                 self.progress_tracker.update(
-                    progress=30, stage="stage_2", message="分離特徵與標籤"
+                    progress=60, stage="stage_2", message="分離特徵與標籤"
                 )
             X = df.drop(columns=["label", "user_id"])
             y = df["label"]
@@ -318,7 +324,7 @@ class DropAnalysisEngine:
             print("\n📋 階段 3/4: 訓練 XGBoost 模型")
             if self.progress_tracker:
                 self.progress_tracker.update(
-                    progress=40, stage="stage_3", message="訓練 XGBoost 模型"
+                    progress=65, stage="stage_3", message="訓練 XGBoost 模型"
                 )
             print("  模型參數:")
             print("    ├─ 決策樹數量: 200")
@@ -343,11 +349,11 @@ class DropAnalysisEngine:
             with tqdm(total=200, desc="訓練進度", unit="樹") as pbar:
                 # XGBoost doesn't support direct progress callback, so we simulate
                 if self.progress_tracker:
-                    self.progress_tracker.update(progress=45, message="訓練模型中...")
+                    self.progress_tracker.update(progress=70, message="訓練模型中...")
                 self.model.fit(X, y)
                 pbar.update(200)
                 if self.progress_tracker:
-                    self.progress_tracker.update(progress=80, message="模型訓練完成")
+                    self.progress_tracker.update(progress=82, message="模型訓練完成")
 
             print("  ✓ 模型訓練完成！")
 
@@ -386,8 +392,8 @@ class DropAnalysisEngine:
             print("=" * 60 + "\n")
 
             if self.progress_tracker:
-                self.progress_tracker.complete(
-                    message=f"訓練完成！準確率: {accuracy:.2%}"
+                self.progress_tracker.update(
+                    progress=88, message=f"訓練完成！準確率: {accuracy:.2%}"
                 )
             logger.info(f"Model training complete: Accuracy={accuracy:.2%}")
             return result

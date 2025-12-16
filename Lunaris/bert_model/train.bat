@@ -26,7 +26,7 @@ echo 開始訓練模型...
 echo ================================================================================
 echo.
 echo 訓練參數:
-echo   - Epochs: 20
+echo   - Epochs: 200
 echo   - Batch Size: 8
 echo   - Hidden Size: 256
 echo   - Attention Heads: 4
@@ -38,7 +38,7 @@ echo ===========================================================================
 echo.
 
 REM 執行訓練
-uv run python train_bert_model.py --epochs 20 --batch-size 8 --hidden-size 256 --num-heads 4 --num-layers 2
+uv run python train_bert_model.py --epochs 200 --batch-size 8 --hidden-size 256 --num-heads 4 --num-layers 2
 
 if %ERRORLEVEL% EQU 0 (
     echo.

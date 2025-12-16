@@ -52,7 +52,7 @@ export const AnimeCard: React.FC<AnimeCardProps> = ({
     <div
       className={`bg-gray-800 rounded-xl overflow-hidden border border-gray-700 ${getBorderColor()} transition-all shadow-lg group`}
     >
-      <div className="flex h-32">
+      <div className="flex h-36">
         <div className="w-24 flex-shrink-0">
           <img
             src={anime.cover}
