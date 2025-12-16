@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { BACKEND_URL } from "../config/env";
 
 // Define types based on the backend response
 interface AnimeTitle {
@@ -41,21 +42,25 @@ export const Soluna = () => {
     setError(null);
 
     try {
-      // Assuming backend is running on localhost:8000
-      const response = await axios.post<SearchResponse>(
-        "http://localhost:8000/search",
-        {
-          query: query,
+      const response = await fetch(`${BACKEND_URL}/search`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
-      setResults(response.data.results);
+        body: JSON.stringify({ query }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data: SearchResponse = await response.json();
+      setResults(data.results);
     } catch (err) {
       console.error("Search failed:", err);
       setError(
         "Failed to fetch data from backend. Please ensure Lunaris is running.",
       );
-    } finally {
-      setLoading(false);
     }
   };
 

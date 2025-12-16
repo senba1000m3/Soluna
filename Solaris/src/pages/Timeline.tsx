@@ -9,8 +9,7 @@ import {
 } from "lucide-react";
 import { QuickIDSelector } from "../components/QuickIDSelector";
 import { StatsPanel, BirthYearCard } from "../components/timeline";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+import { BACKEND_URL } from "../config/env";
 
 interface Anime {
   id: number;
@@ -279,7 +278,7 @@ export const Timeline = () => {
       }}
     >
       <div className="text-center mb-12">
-        <h1 className="text-5xl font-bold mb-4 mt-5 bg-gradient-to-r from-amber-400 to-orange-600 text-transparent bg-clip-text flex items-center justify-center gap-3">
+        <h1 className="text-4xl font-bold mb-4 mt-5 bg-gradient-to-r from-amber-400 to-orange-600 text-transparent bg-clip-text flex items-center justify-center gap-3">
           <Clock className="w-10 h-10 text-amber-500" />
           動畫大世紀
         </h1>

@@ -1,0 +1,18 @@
+# Caddy 反向代理配置
+:8080 {
+    # 處理 /api 路徑，去掉 /api 前綴後導向後端
+    handle_path /api/* {
+        reverse_proxy backend:8000
+    }
+
+    # 其他所有路徑導向前端
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # 日誌記錄
+    log {
+        output stdout
+        format console
+    }
+}

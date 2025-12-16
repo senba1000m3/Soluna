@@ -2,8 +2,8 @@ services:
   backend:
     build: ./Lunaris
     container_name: lunaris_backend
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - ./Lunaris:/app
     environment:
@@ -14,8 +14,28 @@ services:
   frontend:
     build: ./Solaris
     container_name: solaris_frontend
-    ports:
-      - "3000:80"
+    expose:
+      - "80"
     depends_on:
       - backend
+    environment:
+      - VITE_BACKEND_URL=https://cc.tokihato.com/api
     restart: always
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: soluna_caddy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    restart: always
+
+volumes:
+  caddy_data:
+  caddy_config:

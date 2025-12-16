@@ -31,8 +31,7 @@ import {
   shouldShowViewMore,
 } from "../utils/synergyHelpers";
 import { QuickIDSelector } from "../components/QuickIDSelector";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+import { BACKEND_URL } from "../config/env";
 
 /**
  * 共鳴配對頁面

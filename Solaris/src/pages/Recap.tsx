@@ -11,8 +11,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import { QuickIDSelector } from "../components/QuickIDSelector";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+import { BACKEND_URL } from "../config/env";
 
 interface Achievement {
   id: string;

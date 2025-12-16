@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Loader2, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+import { BACKEND_URL } from "../config/env";
 
 interface ProgressUpdate {
   task_id: string;
