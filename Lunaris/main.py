@@ -15,6 +15,7 @@ from sqlmodel import Session, select
 from anilist_client import AniListClient
 from database import engine, get_session, init_db
 from drop_analysis_engine import DropAnalysisEngine
+from hybrid_drop_prediction_engine import HybridDropPredictionEngine
 from hybrid_recommendation_engine import HybridRecommendationEngine
 from ingest_data import fetch_and_store_anime, fetch_and_store_user_data
 from models import GlobalUser, QuickID, User
@@ -903,20 +904,22 @@ async def analyze_drops(
                     status_code=404, detail="User not found in database"
                 )
 
-            # Create a new drop engine with progress tracker
-            drop_engine_with_progress = DropAnalysisEngine(progress_tracker=tracker)
-            train_result = drop_engine_with_progress.train_model(
+            # Create hybrid drop prediction engine with progress tracker
+            # BERT (80%) + XGBoost (20%)
+            hybrid_drop_engine = HybridDropPredictionEngine(
+                bert_model_path="bert_model/trained_models/best_model.pth",
+                bert_dataset_path="bert_model/trained_models/item_mappings.pkl",
+                bert_weight=0.8,
+                xgboost_weight=0.2,
+                use_bert=True,
+                progress_tracker=tracker,
+            )
+
+            # Train XGBoost component
+            train_result = hybrid_drop_engine.train_xgboost_model(
                 session, user_id=db_user.id
             )
-            logger.info(f"Model training complete: {train_result}")
-
-            # Update the global drop_engine with the trained model
-            drop_engine.model = drop_engine_with_progress.model
-            drop_engine.feature_columns = drop_engine_with_progress.feature_columns
-            drop_engine.mlb_genres = drop_engine_with_progress.mlb_genres
-            drop_engine.mlb_tags = drop_engine_with_progress.mlb_tags
-            drop_engine.le_studio = drop_engine_with_progress.le_studio
-            drop_engine.is_trained = drop_engine_with_progress.is_trained
+            logger.info(f"Hybrid model training complete: {train_result}")
 
         except Exception as e:
             logger.error(f"Error training model: {e}")
@@ -958,8 +961,8 @@ async def analyze_drops(
                 elif status in ["CURRENT", "PLANNING"]:
                     # Get anime from DB for prediction
                     anime = session.get(AnimeModel, anime_id)
-                    if anime and drop_engine.is_trained:
-                        # Get user ID for tolerance-based prediction
+                    if anime and hybrid_drop_engine.is_trained:
+                        # Get user ID for hybrid prediction
                         db_user = session.exec(
                             select(UserModel).where(
                                 UserModel.username == request.username
@@ -967,8 +970,9 @@ async def analyze_drops(
                         ).first()
 
                         if db_user:
+                            # Use hybrid prediction (BERT 80% + XGBoost 20%)
                             drop_probability, reasons = (
-                                drop_engine.predict_drop_probability(
+                                hybrid_drop_engine.predict_drop_probability(
                                     anime, db_user.id, session
                                 )
                             )
@@ -1008,8 +1012,11 @@ async def analyze_drops(
         try:
             ratings = session.exec(select(UserRating)).all()
             animes = session.exec(select(AnimeModel)).all()
-            drop_patterns = drop_engine.analyze_drop_patterns(ratings, animes)
-            logger.info("Drop analysis complete!")
+            drop_patterns = hybrid_drop_engine.analyze_drop_patterns(ratings, animes)
+
+            # Get model info for response
+            model_info = hybrid_drop_engine.get_model_info()
+            logger.info(f"Drop analysis complete! Model info: {model_info}")
             tracker.complete(message="分析完成！")
         except Exception as e:
             logger.error(f"Error analyzing drop patterns: {e}")
@@ -1026,7 +1033,12 @@ async def analyze_drops(
             "dropped_list": dropped_list,
             "watching_list": watching_list,
             "planning_list": planning_list,
-            "model_metrics": train_result,
+            "model_metrics": {
+                **train_result,
+                "model_type": "hybrid",
+                "bert_weight": 0.8,
+                "xgboost_weight": 0.2,
+            },
             "drop_patterns": drop_patterns,
         }
     except HTTPException:
