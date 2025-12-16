@@ -30,10 +30,8 @@ class RecommendationEngine:
             row = {
                 "id": anime["id"],
                 "title": anime["title"]["romaji"],
-                "score": entry.get("score", 0)
-                if "score" in entry
-                else 0,  # User score or 0
-                "averageScore": anime.get("averageScore", 0),
+                "score": entry.get("score") or 0,  # User score or 0, handle None
+                "averageScore": anime.get("averageScore") or 0,  # Handle None
             }
 
             # Extract Genres
@@ -98,6 +96,8 @@ class RecommendationEngine:
             if row["score"] > 0 and has_scores:
                 # Centered Score: How much better/worse than average did they like this?
                 weight = (row["score"] - user_mean_score) + 1.0
+                # Ensure weight is always positive
+                weight = max(0.1, weight)
             else:
                 # No score: just count as watched (neutral positive)
                 weight = 1.0
@@ -272,12 +272,39 @@ class RecommendationEngine:
                     {"genre": g.replace("Genre_", ""), "score": combined_weight}
                 )
 
-        common_genres.sort(key=lambda x: x["score"], reverse=True)
+        # Add similarity percentage for each genre before sorting
+        for genre_data in common_genres:
+            g = f"Genre_{genre_data['genre']}"
+            w1 = user1_profile.get(g, 0)
+            w2 = user2_profile.get(g, 0)
+            # Calculate similarity as inverse of difference (normalized)
+            max_weight = max(w1, w2)
+            if max_weight > 0:
+                similarity = 100 - (abs(w1 - w2) / max_weight * 100)
+            else:
+                similarity = 0
+            genre_data["similarity"] = round(max(0, similarity), 2)
+
+        # Sort by similarity percentage (highest first)
+        common_genres.sort(key=lambda x: x["similarity"], reverse=True)
 
         return {
             "score": max(0.0, score),  # Ensure non-negative
-            "common_genres": common_genres[:5],
+            "common_genres": common_genres[:6],  # Top 6 genres
         }
+
+    def _normalize_score(self, score) -> float:
+        """
+        Normalize score to 0-10.0 scale with 2 decimal places.
+        Handles both 0-10 and 0-100 scales, and None values.
+        """
+        if score is None or score == 0:
+            return 0.0
+        # If score is likely 0-100 scale (> 10)
+        if score > 10:
+            return round(score / 10.0, 2)
+        # Already 0-10 scale
+        return round(float(score), 2)
 
     def detailed_user_comparison(
         self,
@@ -308,33 +335,39 @@ class RecommendationEngine:
         for anime_id in common_ids:
             entry1 = user1_anime[anime_id]
             entry2 = user2_anime[anime_id]
-            score1 = entry1.get("score", 0)
-            score2 = entry2.get("score", 0)
+            score1 = self._normalize_score(entry1.get("score", 0))
+            score2 = self._normalize_score(entry2.get("score", 0))
+
+            # Add to common anime regardless of whether they rated it
+            diff = abs(score1 - score2) if (score1 > 0 and score2 > 0) else 0
 
             if score1 > 0 and score2 > 0:  # Both rated it
-                diff = abs(score1 - score2)
                 score_differences.append(diff)
 
-                common_anime.append(
-                    {
-                        "id": anime_id,
-                        "title": entry1["media"]["title"]["romaji"],
-                        "coverImage": entry1["media"]["coverImage"]["large"],
-                        "user1_score": score1,
-                        "user2_score": score2,
-                        "score_diff": diff,
-                        "average_score": entry1["media"].get("averageScore", 0),
-                    }
-                )
+            common_anime.append(
+                {
+                    "id": anime_id,
+                    "title": entry1["media"]["title"]["romaji"],
+                    "coverImage": entry1["media"]["coverImage"]["large"],
+                    "user1_score": score1,
+                    "user2_score": score2,
+                    "score_diff": round(diff, 2),
+                    "average_score": self._normalize_score(
+                        entry1["media"].get("averageScore", 0)
+                    ),
+                    "both_rated": score1 > 0 and score2 > 0,
+                }
+            )
 
         # Sort by combined interest (higher scores from both)
         common_anime.sort(
             key=lambda x: (x["user1_score"] + x["user2_score"]) / 2, reverse=True
         )
 
-        # Find biggest disagreements
+        # Find biggest disagreements (only from both-rated anime)
+        both_rated_anime = [a for a in common_anime if a.get("both_rated", False)]
         disagreements = sorted(
-            common_anime, key=lambda x: x["score_diff"], reverse=True
+            both_rated_anime, key=lambda x: x.get("score_diff", 0), reverse=True
         )[:5]
 
         # Radar chart data - top 6 genres for both users
@@ -350,14 +383,18 @@ class RecommendationEngine:
         recommend_to_user2 = []
         for anime_id in user1_only:
             entry = user1_anime[anime_id]
-            score = entry.get("score", 0)
-            if score >= 8:  # High rated by user1
+            score = self._normalize_score(entry.get("score", 0))
+            avg_score = self._normalize_score(entry["media"].get("averageScore", 0))
+
+            # Include if user scored >= 8.0 OR if no score but high average score
+            if score >= 8.0 or (score == 0 and avg_score >= 7.5):
                 recommend_to_user2.append(
                     {
                         "id": anime_id,
                         "title": entry["media"]["title"]["romaji"],
                         "coverImage": entry["media"]["coverImage"]["large"],
-                        "score": score,
+                        "score": score if score > 0 else avg_score,
+                        "user_scored": score > 0,
                         "genres": entry["media"].get("genres", []),
                     }
                 )
@@ -365,14 +402,18 @@ class RecommendationEngine:
         recommend_to_user1 = []
         for anime_id in user2_only:
             entry = user2_anime[anime_id]
-            score = entry.get("score", 0)
-            if score >= 8:  # High rated by user2
+            score = self._normalize_score(entry.get("score", 0))
+            avg_score = self._normalize_score(entry["media"].get("averageScore", 0))
+
+            # Include if user scored >= 8.0 OR if no score but high average score
+            if score >= 8.0 or (score == 0 and avg_score >= 7.5):
                 recommend_to_user1.append(
                     {
                         "id": anime_id,
                         "title": entry["media"]["title"]["romaji"],
                         "coverImage": entry["media"]["coverImage"]["large"],
-                        "score": score,
+                        "score": score if score > 0 else avg_score,
+                        "user_scored": score > 0,
                         "genres": entry["media"].get("genres", []),
                     }
                 )
@@ -386,10 +427,11 @@ class RecommendationEngine:
             "common_anime": common_anime[:20],  # Top 20 common anime
             "common_count": len(common_anime),
             "disagreements": disagreements,
-            "avg_score_difference": (
+            "avg_score_difference": round(
                 sum(score_differences) / len(score_differences)
                 if score_differences
-                else 0
+                else 0,
+                2,
             ),
             "radar_data": radar_data,
             "stats": stats,
@@ -403,7 +445,7 @@ class RecommendationEngine:
         self, user1_profile: Dict[str, float], user2_profile: Dict[str, float]
     ) -> Dict[str, Any]:
         """
-        Build radar chart data for top genres
+        Build radar chart data for top genres with 2 decimal precision
         """
         # Get all genres with weights
         all_genres = set(user1_profile.keys()) | set(user2_profile.keys())
@@ -429,8 +471,11 @@ class RecommendationEngine:
 
         for genre, w1, w2, _ in top_genres:
             labels.append(genre.replace("Genre_", ""))
-            user1_values.append((w1 / max_weight) * 100 if max_weight > 0 else 0)
-            user2_values.append((w2 / max_weight) * 100 if max_weight > 0 else 0)
+            # Ensure values are always positive (0-100 range)
+            val1 = max(0, (w1 / max_weight) * 100) if max_weight > 0 else 0
+            val2 = max(0, (w2 / max_weight) * 100) if max_weight > 0 else 0
+            user1_values.append(round(val1, 2))
+            user2_values.append(round(val2, 2))
 
         return {"labels": labels, "user1": user1_values, "user2": user2_values}
 
@@ -438,17 +483,21 @@ class RecommendationEngine:
         self, user1_list: List[Dict[str, Any]], user2_list: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Calculate and compare user statistics
+        Calculate and compare user statistics with normalized scores
         """
 
         def calc_stats(user_list):
             total = len(user_list)
             completed = sum(1 for e in user_list if e.get("status") == "COMPLETED")
-            scores = [e.get("score", 0) for e in user_list if e.get("score", 0) > 0]
+            scores = [
+                self._normalize_score(e.get("score", 0))
+                for e in user_list
+                if e.get("score") is not None and e.get("score", 0) > 0
+            ]
             avg_score = sum(scores) / len(scores) if scores else 0
 
             # Count episodes watched
-            episodes = sum(e.get("progress", 0) for e in user_list)
+            episodes = sum(e.get("progress", 0) or 0 for e in user_list)
 
             return {
                 "total_anime": total,

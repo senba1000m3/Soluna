@@ -34,6 +34,7 @@ interface UserProfile {
 interface CommonGenre {
   genre: string;
   score: number;
+  similarity: number;
 }
 
 interface CommonAnime {
@@ -44,6 +45,7 @@ interface CommonAnime {
   user2_score: number;
   score_diff: number;
   average_score: number;
+  both_rated: boolean;
 }
 
 interface RadarData {
@@ -64,6 +66,7 @@ interface Recommendation {
   title: string;
   coverImage: string;
   score: number;
+  user_scored: boolean;
   genres: string[];
 }
 
@@ -97,6 +100,7 @@ export const Synergy = () => {
   const [activeTab, setActiveTab] = useState<
     "overview" | "anime" | "recommendations" | "disagreements"
   >("overview");
+  const [showDisagreementsModal, setShowDisagreementsModal] = useState(false);
 
   const handleCompare = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -242,14 +246,19 @@ export const Synergy = () => {
             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 to-teal-500" />
 
             <div className="flex flex-col md:flex-row items-center justify-center gap-8 mb-8">
-              <div className="flex flex-col items-center">
+              <a
+                href={`https://anilist.co/user/${result.user1.name}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-col items-center hover:opacity-80 transition-opacity"
+              >
                 <img
                   src={result.user1.avatar.large}
                   alt={result.user1.name}
                   className="w-24 h-24 rounded-full border-4 border-blue-500 shadow-lg mb-3"
                 />
                 <h3 className="text-xl font-bold">{result.user1.name}</h3>
-              </div>
+              </a>
 
               <div className="flex flex-col items-center justify-center px-8">
                 <div className="text-6xl font-black mb-2 flex items-baseline gap-1">
@@ -263,14 +272,19 @@ export const Synergy = () => {
                 </div>
               </div>
 
-              <div className="flex flex-col items-center">
+              <a
+                href={`https://anilist.co/user/${result.user2.name}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-col items-center hover:opacity-80 transition-opacity"
+              >
                 <img
                   src={result.user2.avatar.large}
                   alt={result.user2.name}
                   className="w-24 h-24 rounded-full border-4 border-teal-500 shadow-lg mb-3"
                 />
                 <h3 className="text-xl font-bold">{result.user2.name}</h3>
-              </div>
+              </a>
             </div>
 
             <p className="text-xl text-blue-200 font-medium bg-blue-900/30 py-3 px-6 rounded-full inline-block">
@@ -282,10 +296,25 @@ export const Synergy = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-full border-4 border-blue-500 overflow-hidden">
-                  <img src={result.user1.avatar.large} alt="" />
-                </div>
-                <h3 className="text-xl font-bold">{result.user1.name}</h3>
+                <a
+                  href={`https://anilist.co/user/${result.user1.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-12 h-12 rounded-full border-4 border-blue-500 overflow-hidden hover:ring-2 hover:ring-blue-400 transition-all"
+                >
+                  <img
+                    src={result.user1.avatar.large}
+                    alt={result.user1.name}
+                  />
+                </a>
+                <a
+                  href={`https://anilist.co/user/${result.user1.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xl font-bold hover:text-blue-400 transition-colors"
+                >
+                  {result.user1.name}
+                </a>
               </div>
               <div className="space-y-4">
                 <StatItem
@@ -313,10 +342,25 @@ export const Synergy = () => {
 
             <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-full border-4 border-teal-500 overflow-hidden">
-                  <img src={result.user2.avatar.large} alt="" />
-                </div>
-                <h3 className="text-xl font-bold">{result.user2.name}</h3>
+                <a
+                  href={`https://anilist.co/user/${result.user2.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-12 h-12 rounded-full border-4 border-teal-500 overflow-hidden hover:ring-2 hover:ring-teal-400 transition-all"
+                >
+                  <img
+                    src={result.user2.avatar.large}
+                    alt={result.user2.name}
+                  />
+                </a>
+                <a
+                  href={`https://anilist.co/user/${result.user2.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xl font-bold hover:text-teal-400 transition-colors"
+                >
+                  {result.user2.name}
+                </a>
               </div>
               <div className="space-y-4">
                 <StatItem
@@ -463,8 +507,10 @@ export const Synergy = () => {
                             {genre.genre}
                           </span>
                         </div>
-                        <div className="px-3 py-1 bg-gradient-to-r from-blue-500 to-teal-500 rounded-full text-sm font-bold">
-                          共鳴
+                        <div className="flex items-center gap-2">
+                          <div className="px-3 py-1 bg-gradient-to-r from-blue-500 to-teal-500 rounded-full text-sm font-bold">
+                            {genre.similarity.toFixed(1)}%
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -482,9 +528,12 @@ export const Synergy = () => {
               </h3>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {result.common_anime.map((anime) => (
-                  <div
+                  <a
                     key={anime.id}
-                    className="bg-gray-700/50 rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all cursor-pointer group"
+                    href={`https://anilist.co/anime/${anime.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-gray-700/50 rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all cursor-pointer group block"
                   >
                     <img
                       src={anime.coverImage}
@@ -513,11 +562,11 @@ export const Synergy = () => {
                       </div>
                       {anime.score_diff > 0 && (
                         <div className="mt-2 text-xs text-gray-400 text-center">
-                          差異: {anime.score_diff.toFixed(1)}
+                          差異: {anime.score_diff.toFixed(2)}
                         </div>
                       )}
                     </div>
-                  </div>
+                  </a>
                 ))}
               </div>
             </div>
@@ -535,9 +584,15 @@ export const Synergy = () => {
                   </span>
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                  {result.recommendations.for_user2.map((anime) => (
-                    <RecommendationCard key={anime.id} anime={anime} />
-                  ))}
+                  {result.recommendations.for_user2.length > 0 ? (
+                    result.recommendations.for_user2.map((anime) => (
+                      <RecommendationCard key={anime.id} anime={anime} />
+                    ))
+                  ) : (
+                    <div className="col-span-full text-center text-gray-400 py-8">
+                      暫無推薦（需要高分作品）
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -551,9 +606,15 @@ export const Synergy = () => {
                   </span>
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                  {result.recommendations.for_user1.map((anime) => (
-                    <RecommendationCard key={anime.id} anime={anime} />
-                  ))}
+                  {result.recommendations.for_user1.length > 0 ? (
+                    result.recommendations.for_user1.map((anime) => (
+                      <RecommendationCard key={anime.id} anime={anime} />
+                    ))
+                  ) : (
+                    <div className="col-span-full text-center text-gray-400 py-8">
+                      暫無推薦（需要高分作品）
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -561,66 +622,243 @@ export const Synergy = () => {
 
           {activeTab === "disagreements" && (
             <div className="bg-gray-800 rounded-2xl p-8 border border-gray-700">
-              <h3 className="text-2xl font-bold mb-6 flex items-center gap-2">
-                <AlertCircle className="w-6 h-6 text-orange-400" />
-                品味分歧最大的作品
-              </h3>
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-2xl font-bold flex items-center gap-2">
+                  <AlertCircle className="w-6 h-6 text-orange-400" />
+                  品味分歧最大的作品
+                </h3>
+                {result.disagreements.length > 5 && (
+                  <button
+                    onClick={() => setShowDisagreementsModal(true)}
+                    className="px-4 py-2 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 rounded-lg font-semibold transition-all flex items-center gap-2 shadow-lg"
+                  >
+                    查看全部 ({result.disagreements.length})
+                    <AlertCircle className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
               <div className="space-y-4">
-                {result.disagreements.map((anime, idx) => (
+                {result.disagreements.length > 0 ? (
+                  result.disagreements.slice(0, 5).map((anime, idx) => (
+                    <div
+                      key={anime.id}
+                      className="bg-gray-700/50 rounded-lg p-4 flex flex-col md:flex-row gap-4 items-start md:items-center"
+                    >
+                      <div className="text-2xl font-bold text-gray-500 w-8">
+                        #{idx + 1}
+                      </div>
+                      <a
+                        href={`https://anilist.co/anime/${anime.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <img
+                          src={anime.coverImage}
+                          alt={anime.title}
+                          className="w-16 h-24 object-cover rounded hover:ring-2 hover:ring-orange-400 transition-all"
+                        />
+                      </a>
+                      <div className="flex-1">
+                        <a
+                          href={`https://anilist.co/anime/${anime.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-bold text-lg mb-2 hover:text-blue-400 transition-colors block"
+                        >
+                          {anime.title}
+                        </a>
+                        <div className="flex items-center gap-6">
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={`https://anilist.co/user/${result.user1.name}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-10 h-10 rounded-full border-4 border-blue-500 overflow-hidden hover:ring-2 hover:ring-blue-400 transition-all"
+                            >
+                              <img
+                                src={result.user1.avatar.large}
+                                alt={result.user1.name}
+                              />
+                            </a>
+                            <div>
+                              <div className="text-xs text-gray-400">
+                                {result.user1.name}
+                              </div>
+                              <div className="text-xl font-bold text-blue-400">
+                                {anime.user1_score > 0
+                                  ? anime.user1_score.toFixed(1)
+                                  : "-"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={`https://anilist.co/user/${result.user2.name}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-10 h-10 rounded-full border-4 border-teal-500 overflow-hidden hover:ring-2 hover:ring-teal-400 transition-all"
+                            >
+                              <img
+                                src={result.user2.avatar.large}
+                                alt={result.user2.name}
+                              />
+                            </a>
+                            <div>
+                              <div className="text-xs text-gray-400">
+                                {result.user2.name}
+                              </div>
+                              <div className="text-xl font-bold text-teal-400">
+                                {anime.user2_score > 0
+                                  ? anime.user2_score.toFixed(1)
+                                  : "-"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="ml-auto">
+                            <div className="text-xs text-gray-400">
+                              評分差異
+                            </div>
+                            <div className="text-2xl font-bold text-orange-400">
+                              {anime.score_diff.toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-gray-400">
+                    <p>雙方評分非常一致，沒有明顯的品味分歧！</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Disagreements Modal */}
+      {showDisagreementsModal && result && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in"
+          onClick={() => setShowDisagreementsModal(false)}
+        >
+          <div
+            className="bg-gray-800 rounded-2xl p-8 border border-orange-500/30 shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-700">
+              <h3 className="text-2xl font-bold flex items-center gap-2">
+                <AlertCircle className="w-6 h-6 text-orange-400" />
+                所有品味分歧作品 ({result.disagreements.length})
+              </h3>
+              <button
+                onClick={() => setShowDisagreementsModal(false)}
+                className="text-gray-400 hover:text-white hover:bg-gray-700 transition-all text-2xl font-bold w-10 h-10 flex items-center justify-center rounded-lg"
+                title="關閉"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-4 overflow-y-auto pr-2 flex-1">
+              {result.disagreements.length > 0 ? (
+                result.disagreements.map((anime, idx) => (
                   <div
                     key={anime.id}
-                    className="bg-gray-700/50 rounded-lg p-4 flex flex-col md:flex-row gap-4 items-start md:items-center"
+                    className="bg-gray-700/50 rounded-lg p-4 flex flex-col md:flex-row gap-4 items-start md:items-center hover:bg-gray-700/70 transition-colors"
                   >
                     <div className="text-2xl font-bold text-gray-500 w-8">
                       #{idx + 1}
                     </div>
-                    <img
-                      src={anime.coverImage}
-                      alt={anime.title}
-                      className="w-16 h-24 object-cover rounded"
-                    />
+                    <a
+                      href={`https://anilist.co/anime/${anime.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src={anime.coverImage}
+                        alt={anime.title}
+                        className="w-16 h-24 object-cover rounded hover:ring-2 hover:ring-orange-400 transition-all"
+                      />
+                    </a>
                     <div className="flex-1">
-                      <h4 className="font-bold text-lg mb-2">{anime.title}</h4>
+                      <a
+                        href={`https://anilist.co/anime/${anime.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-lg mb-2 hover:text-blue-400 transition-colors block"
+                      >
+                        {anime.title}
+                      </a>
                       <div className="flex items-center gap-6">
                         <div className="flex items-center gap-2">
-                          <div className="w-10 h-10 rounded-full border-4 border-blue-500 overflow-hidden">
-                            <img src={result.user1.avatar.large} alt="" />
-                          </div>
+                          <a
+                            href={`https://anilist.co/user/${result.user1.name}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-10 h-10 rounded-full border-4 border-blue-500 overflow-hidden hover:ring-2 hover:ring-blue-400 transition-all"
+                          >
+                            <img
+                              src={result.user1.avatar.large}
+                              alt={result.user1.name}
+                            />
+                          </a>
                           <div>
                             <div className="text-xs text-gray-400">
                               {result.user1.name}
                             </div>
                             <div className="text-xl font-bold text-blue-400">
-                              {anime.user1_score}
+                              {anime.user1_score > 0
+                                ? anime.user1_score.toFixed(1)
+                                : "-"}
                             </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="w-10 h-10 rounded-full border-4 border-teal-500 overflow-hidden">
-                            <img src={result.user2.avatar.large} alt="" />
-                          </div>
+                          <a
+                            href={`https://anilist.co/user/${result.user2.name}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-10 h-10 rounded-full border-4 border-teal-500 overflow-hidden hover:ring-2 hover:ring-teal-400 transition-all"
+                          >
+                            <img
+                              src={result.user2.avatar.large}
+                              alt={result.user2.name}
+                            />
+                          </a>
                           <div>
                             <div className="text-xs text-gray-400">
                               {result.user2.name}
                             </div>
                             <div className="text-xl font-bold text-teal-400">
-                              {anime.user2_score}
+                              {anime.user2_score > 0
+                                ? anime.user2_score.toFixed(1)
+                                : "-"}
                             </div>
                           </div>
                         </div>
                         <div className="ml-auto">
                           <div className="text-xs text-gray-400">評分差異</div>
                           <div className="text-2xl font-bold text-orange-400">
-                            {anime.score_diff.toFixed(1)}
+                            {anime.score_diff.toFixed(2)}
                           </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                ))
+              ) : (
+                <div className="text-center py-12 text-gray-400">
+                  <AlertCircle className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                  <p className="text-lg">沒有找到評分差異的作品</p>
+                  <p className="text-sm mt-2">可能雙方都沒有對共同作品評分</p>
+                </div>
+              )}
             </div>
-          )}
+            <div className="mt-4 pt-4 border-t border-gray-700 text-center text-sm text-gray-400">
+              使用滑鼠滾輪或觸控滑動瀏覽 • 點擊作品查看詳情
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -671,7 +909,12 @@ const TabButton = ({
 );
 
 const RecommendationCard = ({ anime }: { anime: Recommendation }) => (
-  <div className="bg-gray-700/50 rounded-lg overflow-hidden hover:ring-2 hover:ring-purple-500 transition-all cursor-pointer group">
+  <a
+    href={`https://anilist.co/anime/${anime.id}`}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="bg-gray-700/50 rounded-lg overflow-hidden hover:ring-2 hover:ring-purple-500 transition-all cursor-pointer group block"
+  >
     <div className="relative">
       <img
         src={anime.coverImage}
@@ -680,8 +923,13 @@ const RecommendationCard = ({ anime }: { anime: Recommendation }) => (
       />
       <div className="absolute top-2 right-2 bg-yellow-500 text-black px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1">
         <Star className="w-3 h-3 fill-black" />
-        {anime.score}
+        {anime.score.toFixed(1)}
       </div>
+      {!anime.user_scored && (
+        <div className="absolute top-2 left-2 bg-gray-800/90 text-white px-2 py-1 rounded text-xs">
+          社群評分
+        </div>
+      )}
     </div>
     <div className="p-3">
       <h4 className="font-semibold text-sm line-clamp-2 h-10 mb-2">
@@ -695,5 +943,5 @@ const RecommendationCard = ({ anime }: { anime: Recommendation }) => (
         ))}
       </div>
     </div>
-  </div>
+  </a>
 );
