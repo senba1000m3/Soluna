@@ -490,7 +490,7 @@ async def search_anime(request: SearchRequest):
 async def recommend_anime(request: RecommendRequest):
     """
     Get seasonal recommendations using hybrid recommendation engine.
-    If username is provided, uses BERT + content-based filtering.
+    If username is provided, uses BERT (80%) + content-based filtering (20%).
     Defaults to the next season if season/year are not provided.
     """
     try:
@@ -519,14 +519,18 @@ async def recommend_anime(request: RecommendRequest):
             if user_list:
                 # Use hybrid engine if available, otherwise fall back to content-only
                 if hybrid_rec_engine:
-                    logger.info("Using hybrid recommendation engine...")
-                    anime_list = hybrid_rec_engine.recommend_seasonal(
-                        user_list=user_list,
-                        seasonal_anime=anime_list,
-                        bert_weight=0.6,
-                        content_weight=0.4,
-                        top_reference_anime=50,
+                    logger.info(
+                        "Using hybrid recommendation engine (BERT 80% + Content 20%)..."
                     )
+
+                    # ✅ 修復：使用 database session 給 BERT 推薦器
+                    with Session(engine) as session:
+                        anime_list = hybrid_rec_engine.recommend_seasonal(
+                            user_list=user_list,
+                            seasonal_anime=anime_list,
+                            session=session,  # ✅ 正確參數
+                            top_k=50,  # ✅ 正確參數
+                        )
                 else:
                     logger.warning("Hybrid engine not available, using content-only")
                     user_profile = rec_engine.build_user_profile(user_list)
@@ -545,6 +549,7 @@ async def recommend_anime(request: RecommendRequest):
 
     except Exception as e:
         logger.error(f"Error in recommend endpoint: {e}")
+        logger.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -564,15 +569,15 @@ def get_recommendation_status():
 
         if hybrid_rec_engine:
             status["bert_enabled"] = hybrid_rec_engine.use_bert
-            status["bert_available"] = (
-                hybrid_rec_engine.bert_recommender is not None
-                and hybrid_rec_engine.bert_recommender.is_available()
-            )
 
-            if status["bert_enabled"] and status.get("bert_available", False):
+            # ✅ 修復：更簡單的 BERT 可用性檢查
+            bert_available = hybrid_rec_engine.bert_recommender is not None
+            status["bert_available"] = bert_available
+
+            if status["bert_enabled"] and bert_available:
                 status["mode"] = "hybrid"
-                status["bert_weight"] = 0.6
-                status["content_weight"] = 0.4
+                status["bert_weight"] = 0.8  # ✅ 更新為 80%
+                status["content_weight"] = 0.2  # ✅ 更新為 20%
             else:
                 status["mode"] = "content_only"
                 status["bert_weight"] = 0.0
