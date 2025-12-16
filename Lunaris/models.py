@@ -1,10 +1,49 @@
-from typing import List, Optional
 from datetime import datetime
+from typing import List, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
 
+class GlobalUser(SQLModel, table=True):
+    """全局使用者表 - 儲存主 ID 及其常用 ID 列表"""
+
+    __tablename__ = "global_user"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    anilist_username: str = Field(
+        index=True, unique=True, description="主 ID 的 AniList 使用者名稱"
+    )
+    anilist_id: int = Field(description="主 ID 的 AniList 使用者 ID")
+    avatar: str = Field(description="主 ID 的頭像 URL")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_login: datetime = Field(default_factory=datetime.utcnow)
+
+    # 關聯 - 此使用者的常用 ID 列表
+    quick_ids: List["QuickID"] = Relationship(back_populates="owner")
+
+
+class QuickID(SQLModel, table=True):
+    """常用 ID 列表 - 不包含主 ID，只儲存額外的常用 ID"""
+
+    __tablename__ = "quick_id"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    owner_id: int = Field(
+        foreign_key="global_user.id", index=True, description="所屬的主 ID"
+    )
+    anilist_username: str = Field(description="常用 ID 的 AniList 使用者名稱")
+    anilist_id: int = Field(description="常用 ID 的 AniList 使用者 ID")
+    avatar: str = Field(description="常用 ID 的頭像 URL")
+    nickname: Optional[str] = Field(default=None, description="自訂暱稱")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # 關聯
+    owner: GlobalUser = Relationship(back_populates="quick_ids")
+
+
 class User(SQLModel, table=True):
+    """舊版使用者表 - 保留用於其他功能"""
+
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(index=True, unique=True)
     anilist_id: Optional[int] = Field(default=None, index=True)
@@ -45,6 +84,7 @@ class UserRating(SQLModel, table=True):
 
 class AnimeVoiceActorCache(SQLModel, table=True):
     """快取動漫聲優資料，避免重複查詢 AniList API"""
+
     id: Optional[int] = Field(default=None, primary_key=True)
     anime_id: int = Field(index=True, unique=True)  # AniList 動漫 ID
     voice_actors_data: str  # JSON 字串格式儲存聲優資料

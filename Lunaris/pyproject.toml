@@ -16,6 +16,8 @@ dependencies = [
     "sqlmodel>=0.0.22",
     "torch>=2.0.0",
     "tqdm>=4.66.0",
+    "passlib>=1.7.4",
+    "bcrypt>=4.0.0",
 ]
 
 [tool.uv]

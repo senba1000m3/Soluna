@@ -30,6 +30,7 @@ import {
   hasRecommendations,
   shouldShowViewMore,
 } from "../utils/synergyHelpers";
+import { QuickIDSelector } from "../components/QuickIDSelector";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
@@ -211,35 +212,29 @@ const ComparisonForm: React.FC<{
     className="mb-12 bg-gray-800 p-8 rounded-xl border border-gray-700 shadow-xl"
   >
     <div className="flex flex-col md:flex-row gap-6 items-center justify-center mb-8">
-      <div className="w-full">
-        <label className="block text-sm font-medium mb-2 text-gray-300">
-          使用者 A
-        </label>
-        <input
-          type="text"
+      <div className="w-full md:flex-1">
+        <QuickIDSelector
           value={user1}
-          onChange={(e) => onUser1Change(e.target.value)}
+          onChange={onUser1Change}
+          label="使用者 A"
           placeholder="例如: senba1000m3"
-          className="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-lg"
+          required={true}
         />
       </div>
 
-      <div className="flex items-center justify-center pt-6">
+      <div className="flex items-center justify-center md:pt-6">
         <div className="bg-gray-700 p-3 rounded-full">
           <Zap className="w-6 h-6 text-yellow-400 fill-yellow-400" />
         </div>
       </div>
 
-      <div className="w-full">
-        <label className="block text-sm font-medium mb-2 text-gray-300">
-          使用者 B
-        </label>
-        <input
-          type="text"
+      <div className="w-full md:flex-1">
+        <QuickIDSelector
           value={user2}
-          onChange={(e) => onUser2Change(e.target.value)}
-          placeholder="例如: TrashTaste"
-          className="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-lg"
+          onChange={onUser2Change}
+          label="使用者 B"
+          placeholder="例如: thet"
+          required={true}
         />
       </div>
     </div>

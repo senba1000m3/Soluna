@@ -9,6 +9,7 @@ import {
   X,
   Info,
 } from "lucide-react";
+import { QuickIDSelector } from "../components/QuickIDSelector";
 import {
   BarChart,
   Bar,
@@ -152,12 +153,13 @@ export const DropPredict = () => {
       >
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row gap-4">
-            <input
-              type="text"
+            <QuickIDSelector
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={setUsername}
+              label="AniList 使用者名稱"
               placeholder="輸入 AniList ID (例如: senba1000m3)"
-              className="flex-1 px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-red-500 focus:ring-2 focus:ring-red-500 outline-none transition-all text-lg"
+              required={true}
+              className="flex-1"
             />
             <button
               type="submit"

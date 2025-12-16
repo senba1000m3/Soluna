@@ -10,6 +10,7 @@ import {
   Eye,
   BarChart3,
 } from "lucide-react";
+import { QuickIDSelector } from "../components/QuickIDSelector";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
@@ -810,19 +811,13 @@ export const Recap = () => {
           className="mb-12 bg-gray-800 p-8 rounded-xl border border-gray-700 max-w-3xl mx-auto"
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-            <div>
-              <label className="block text-sm font-medium mb-2 text-gray-300">
-                AniList 使用者名稱
-              </label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="例如: senba1000m3"
-                className="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all text-lg"
-                required
-              />
-            </div>
+            <QuickIDSelector
+              value={username}
+              onChange={setUsername}
+              label="AniList 使用者名稱"
+              placeholder="例如: senba1000m3"
+              required={true}
+            />
 
             <div>
               <label className="block text-sm font-medium mb-2 text-gray-300">

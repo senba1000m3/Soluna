@@ -10,6 +10,7 @@ import {
   Trophy,
   Cake,
 } from "lucide-react";
+import { QuickIDSelector } from "../components/QuickIDSelector";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
@@ -208,28 +209,22 @@ export const Timeline = () => {
       >
         <div className="space-y-6">
           {/* Row 1: ID Input */}
-          <div>
-            <label className="block text-sm font-medium mb-2 text-gray-300">
-              AniList ID (選填)
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => {
-                  setUsername(e.target.value);
-                  if (!e.target.value) setIsDateLocked(false);
-                }}
-                onBlur={checkUser}
-                placeholder="輸入 ID 以自動獲取生日 (例如: senba1000m3)"
-                className="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 outline-none transition-all text-lg"
-              />
-              {checkingUser && (
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                  <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
-                </div>
-              )}
-            </div>
+          <div className="relative">
+            <QuickIDSelector
+              value={username}
+              onChange={(value) => {
+                setUsername(value);
+                if (!value) setIsDateLocked(false);
+              }}
+              label="AniList ID (選填)"
+              placeholder="輸入 ID 以自動獲取生日 (例如: senba1000m3)"
+              required={false}
+            />
+            {checkingUser && (
+              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
+              </div>
+            )}
             <p className="text-xs text-gray-500 mt-1">
               若找不到 ID 或無生日資料，請手動輸入下方日期
             </p>

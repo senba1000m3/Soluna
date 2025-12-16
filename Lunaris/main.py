@@ -17,7 +17,7 @@ from database import engine, get_session, init_db
 from drop_analysis_engine import DropAnalysisEngine
 from hybrid_recommendation_engine import HybridRecommendationEngine
 from ingest_data import fetch_and_store_anime, fetch_and_store_user_data
-from models import User
+from models import GlobalUser, QuickID, User
 from progress_tracker import progress_manager
 from recommendation_engine import RecommendationEngine
 
@@ -128,12 +128,14 @@ def format_season_display(season: str) -> str:
 
 
 # --- Pydantic Models ---
+# Request Models
+# ───────────────────────────────────────────────────────────────────────────────
 
 
 class RecommendRequest(BaseModel):
-    season: Optional[str] = None
+    username: Optional[str] = None
     year: Optional[int] = None
-    username: Optional[str] = None  # Optional: for personalized filtering
+    season: Optional[str] = None
 
 
 class SearchRequest(BaseModel):
@@ -142,7 +144,7 @@ class SearchRequest(BaseModel):
 
 class CreateUserRequest(BaseModel):
     username: str
-    anilist_id: Optional[int] = None
+    anilist_id: int
 
 
 class DropPredictRequest(BaseModel):
@@ -156,10 +158,10 @@ class PairCompareRequest(BaseModel):
 
 
 class TimelineRequest(BaseModel):
-    username: Optional[str] = None
-    birth_year: int
-    birth_month: Optional[int] = None
-    birth_day: Optional[int] = None
+    users: List[str]
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
+    season: Optional[str] = None
 
 
 class UserInfoRequest(BaseModel):
@@ -168,7 +170,7 @@ class UserInfoRequest(BaseModel):
 
 class AnalyzeDropsRequest(BaseModel):
     username: str
-    task_id: Optional[str] = None  # Optional task ID for progress tracking
+    limit: int = 10
 
 
 class RecapRequest(BaseModel):
@@ -187,6 +189,218 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+
+# ============================================================================
+# 全局使用者與快速 ID 管理 API
+# ============================================================================
+
+
+class SetGlobalUserRequest(BaseModel):
+    anilist_username: str
+    anilist_id: int
+    avatar: str
+
+
+class AddQuickIDRequest(BaseModel):
+    owner_anilist_id: int  # 主 ID 的 AniList ID
+    anilist_username: str
+    anilist_id: int
+    avatar: str
+    nickname: Optional[str] = None
+
+
+@app.post("/global-user/login")
+def login_global_user(
+    request: SetGlobalUserRequest, session: Session = Depends(get_session)
+):
+    """設定全局使用者（主 ID）- 如果已存在則返回現有資料"""
+    # 檢查是否已存在
+    existing_user = session.exec(
+        select(GlobalUser).where(GlobalUser.anilist_id == request.anilist_id)
+    ).first()
+
+    if existing_user:
+        # 更新最後登入時間
+        existing_user.last_login = datetime.utcnow()
+        session.add(existing_user)
+        session.commit()
+        session.refresh(existing_user)
+
+        # 載入常用 ID 列表
+        quick_ids = session.exec(
+            select(QuickID).where(QuickID.owner_id == existing_user.id)
+        ).all()
+
+        return {
+            "user": {
+                "id": existing_user.id,
+                "anilistUsername": existing_user.anilist_username,
+                "anilistId": existing_user.anilist_id,
+                "avatar": existing_user.avatar,
+                "createdAt": existing_user.created_at.isoformat(),
+            },
+            "quickIds": [
+                {
+                    "id": qid.id,
+                    "anilistUsername": qid.anilist_username,
+                    "anilistId": qid.anilist_id,
+                    "avatar": qid.avatar,
+                    "nickname": qid.nickname,
+                    "createdAt": qid.created_at.isoformat(),
+                }
+                for qid in quick_ids
+            ],
+        }
+
+    # 創建新使用者
+    new_user = GlobalUser(
+        anilist_username=request.anilist_username,
+        anilist_id=request.anilist_id,
+        avatar=request.avatar,
+    )
+    session.add(new_user)
+    session.commit()
+    session.refresh(new_user)
+
+    return {
+        "user": {
+            "id": new_user.id,
+            "anilistUsername": new_user.anilist_username,
+            "anilistId": new_user.anilist_id,
+            "avatar": new_user.avatar,
+            "createdAt": new_user.created_at.isoformat(),
+        },
+        "quickIds": [],
+    }
+
+
+@app.post("/global-user/logout")
+def logout_global_user(anilist_id: int, session: Session = Depends(get_session)):
+    """登出全局使用者 - 刪除主 ID 及其所有常用 ID"""
+    user = session.exec(
+        select(GlobalUser).where(GlobalUser.anilist_id == anilist_id)
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 刪除所有常用 ID
+    quick_ids = session.exec(select(QuickID).where(QuickID.owner_id == user.id)).all()
+    for qid in quick_ids:
+        session.delete(qid)
+
+    # 刪除主 ID
+    session.delete(user)
+    session.commit()
+
+    return {"message": "Logged out successfully"}
+
+
+@app.get("/global-user/{anilist_id}/quick-ids")
+def get_user_quick_ids(anilist_id: int, session: Session = Depends(get_session)):
+    """取得指定主 ID 的所有常用 ID"""
+    user = session.exec(
+        select(GlobalUser).where(GlobalUser.anilist_id == anilist_id)
+    ).first()
+
+    if not user:
+        return []
+
+    quick_ids = session.exec(select(QuickID).where(QuickID.owner_id == user.id)).all()
+
+    return [
+        {
+            "id": qid.id,
+            "anilistUsername": qid.anilist_username,
+            "anilistId": qid.anilist_id,
+            "avatar": qid.avatar,
+            "nickname": qid.nickname,
+            "createdAt": qid.created_at.isoformat(),
+        }
+        for qid in quick_ids
+    ]
+
+
+@app.post("/quick-ids")
+def add_quick_id(request: AddQuickIDRequest, session: Session = Depends(get_session)):
+    """新增常用 ID 到指定主 ID 的列表"""
+    # 找到主 ID
+    owner = session.exec(
+        select(GlobalUser).where(GlobalUser.anilist_id == request.owner_anilist_id)
+    ).first()
+
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner user not found")
+
+    # 檢查是否已存在相同的 AniList ID
+    existing = session.exec(
+        select(QuickID).where(
+            QuickID.owner_id == owner.id,
+            QuickID.anilist_id == request.anilist_id,
+        )
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="此 ID 已在常用列表中")
+
+    # 創建新的常用 ID
+    new_quick_id = QuickID(
+        owner_id=owner.id,
+        anilist_username=request.anilist_username,
+        anilist_id=request.anilist_id,
+        avatar=request.avatar,
+        nickname=request.nickname,
+    )
+    session.add(new_quick_id)
+    session.commit()
+    session.refresh(new_quick_id)
+
+    return {
+        "id": new_quick_id.id,
+        "anilistUsername": new_quick_id.anilist_username,
+        "anilistId": new_quick_id.anilist_id,
+        "avatar": new_quick_id.avatar,
+        "nickname": new_quick_id.nickname,
+        "createdAt": new_quick_id.created_at.isoformat(),
+    }
+
+
+@app.delete("/quick-ids/{quick_id}")
+def delete_quick_id(quick_id: int, session: Session = Depends(get_session)):
+    """刪除常用 ID"""
+    qid = session.get(QuickID, quick_id)
+    if not qid:
+        raise HTTPException(status_code=404, detail="Quick ID not found")
+
+    session.delete(qid)
+    session.commit()
+
+    return {"message": "Quick ID deleted"}
+
+
+@app.patch("/quick-ids/{quick_id}")
+def update_quick_id_nickname(
+    quick_id: int, nickname: str, session: Session = Depends(get_session)
+):
+    """更新常用 ID 的暱稱"""
+    qid = session.get(QuickID, quick_id)
+    if not qid:
+        raise HTTPException(status_code=404, detail="Quick ID not found")
+
+    qid.nickname = nickname
+    session.add(qid)
+    session.commit()
+    session.refresh(qid)
+
+    return {
+        "id": qid.id,
+        "anilistUsername": qid.anilist_username,
+        "anilistId": qid.anilist_id,
+        "avatar": qid.avatar,
+        "nickname": qid.nickname,
+        "createdAt": qid.created_at.isoformat(),
+    }
 
 
 @app.get("/progress/{task_id}")
