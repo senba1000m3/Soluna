@@ -12,6 +12,7 @@ import {
   Plus,
   X,
   Search as SearchIcon,
+  LogOutIcon,
 } from "lucide-react";
 import { useGlobalUser } from "../contexts/AuthContext";
 
@@ -235,7 +236,7 @@ export const Navbar = () => {
                           onClick={handleLogout}
                           className="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center gap-2 text-sm text-red-400 transition-colors"
                         >
-                          <X className="w-4 h-4" />
+                          <LogOutIcon className="w-4 h-4" />
                           登出
                         </button>
                       </div>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Clock,
   Calendar,
@@ -101,6 +101,49 @@ export const Timeline = () => {
   const [isDateLocked, setIsDateLocked] = useState(false);
   const [result, setResult] = useState<TimelineResponse | null>(null);
   const [error, setError] = useState("");
+  const [yearError, setYearError] = useState("");
+  const [monthError, setMonthError] = useState("");
+  const [dayError, setDayError] = useState("");
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  // 即時驗證：年份
+  const handleYearChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBirthYear(e.target.value);
+    const now = new Date();
+    const year = parseInt(e.target.value);
+    if (
+      !e.target.value ||
+      isNaN(year) ||
+      year < 1900 ||
+      year > now.getFullYear()
+    ) {
+      setYearError("年份格式錯誤");
+    } else {
+      setYearError("");
+    }
+  };
+  // 即時驗證：月份（允許前導0，但不能超過兩位數）
+  const handleMonthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBirthMonth(val);
+    const month = parseInt(val, 10);
+    if (!val || isNaN(month) || month < 1 || month > 12 || val.length > 2) {
+      setMonthError("月份格式錯誤");
+    } else {
+      setMonthError("");
+    }
+  };
+  // 即時驗證：日期（允許前導0，但不能超過兩位數）
+  const handleDayChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBirthDay(val);
+    const day = parseInt(val, 10);
+    if (!val || isNaN(day) || day < 1 || day > 31 || val.length > 2) {
+      setDayError("日期格式錯誤");
+    } else {
+      setDayError("");
+    }
+  };
 
   const checkUser = async () => {
     if (!username.trim()) {
@@ -122,9 +165,10 @@ export const Timeline = () => {
         const data = await response.json();
         const dob = data.dateOfBirth;
         if (dob && dob.year) {
+          // pad month/day to 2 digits
           setBirthYear(dob.year.toString());
-          setBirthMonth(dob.month ? dob.month.toString() : "");
-          setBirthDay(dob.day ? dob.day.toString() : "");
+          setBirthMonth(dob.month ? dob.month.toString().padStart(2, "0") : "");
+          setBirthDay(dob.day ? dob.day.toString().padStart(2, "0") : "");
           setIsDateLocked(true);
           setError("");
         } else {
@@ -144,20 +188,42 @@ export const Timeline = () => {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!birthYear) {
-      setError("請輸入出生年份");
-      return;
-    }
+    setError("");
+    setYearError("");
+    setMonthError("");
+    setDayError("");
 
-    const yearInt = parseInt(birthYear);
-    if (
-      isNaN(yearInt) ||
-      yearInt < 1960 ||
-      yearInt > new Date().getFullYear()
-    ) {
-      setError("請輸入有效的年份 (1960 - 現在)");
-      return;
+    let valid = true;
+    const now = new Date();
+    const year = parseInt(birthYear);
+    const month = parseInt(birthMonth);
+    const day = parseInt(birthDay);
+
+    if (!birthYear || isNaN(year) || year < 1900 || year > now.getFullYear()) {
+      setYearError("年份格式錯誤");
+      valid = false;
     }
+    if (!birthMonth || isNaN(month) || month < 1 || month > 12) {
+      setMonthError("月份格式錯誤");
+      valid = false;
+    }
+    if (!birthDay || isNaN(day) || day < 1 || day > 31) {
+      setDayError("日期格式錯誤");
+      valid = false;
+    }
+    const testDate = new Date(year, month - 1, day);
+    if (
+      !isNaN(year) &&
+      !isNaN(month) &&
+      !isNaN(day) &&
+      (testDate.getFullYear() !== year ||
+        testDate.getMonth() + 1 !== month ||
+        testDate.getDate() !== day)
+    ) {
+      setDayError("日期不存在");
+      valid = false;
+    }
+    if (!valid) return;
 
     setLoading(true);
     setError("");
@@ -171,9 +237,9 @@ export const Timeline = () => {
         },
         body: JSON.stringify({
           username: username.trim() || null,
-          birth_year: yearInt,
-          birth_month: birthMonth ? parseInt(birthMonth) : null,
-          birth_day: birthDay ? parseInt(birthDay) : null,
+          birth_year: year,
+          birth_month: month,
+          birth_day: day,
         }),
       });
 
@@ -192,7 +258,16 @@ export const Timeline = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4">
+    <div
+      className="max-w-5xl mx-auto px-4"
+      style={{
+        transform: "none",
+        overflow: "visible",
+        position: "static",
+        filter: "none",
+        zIndex: "auto",
+      }}
+    >
       <div className="text-center mb-12">
         <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-amber-400 to-orange-600 text-transparent bg-clip-text flex items-center justify-center gap-3">
           <Clock className="w-10 h-10 text-amber-500" />
@@ -230,69 +305,127 @@ export const Timeline = () => {
             </p>
           </div>
 
-          {/* Row 2: Date Inputs */}
-          <div>
-            <label className="block text-sm font-medium mb-2 text-gray-300">
-              出生日期{" "}
+          <div className="flex items-center justify-between mb-1 relative">
+            <span className="block text-sm font-medium text-gray-300">
+              出生日期
               {isDateLocked && (
                 <span className="text-amber-500 text-xs ml-2">
                   (已從 ID 鎖定)
                 </span>
               )}
-            </label>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="relative">
-                <input
-                  type="number"
-                  value={birthYear}
-                  onChange={(e) => setBirthYear(e.target.value)}
-                  disabled={isDateLocked}
-                  placeholder="年 (YYYY)"
-                  className={`w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 outline-none transition-all text-lg ${
-                    isDateLocked ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                />
-                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm">
-                  年
-                </span>
-              </div>
-              <div className="relative">
-                <input
-                  type="number"
-                  value={birthMonth}
-                  onChange={(e) => setBirthMonth(e.target.value)}
-                  disabled={isDateLocked}
-                  placeholder="月"
-                  className={`w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 outline-none transition-all text-lg ${
-                    isDateLocked ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                />
-                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm">
-                  月
-                </span>
-              </div>
-              <div className="relative">
-                <input
-                  type="number"
-                  value={birthDay}
-                  onChange={(e) => setBirthDay(e.target.value)}
-                  disabled={isDateLocked}
-                  placeholder="日"
-                  className={`w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 outline-none transition-all text-lg ${
-                    isDateLocked ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                />
-                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm">
-                  日
-                </span>
-              </div>
+            </span>
+            <div className="relative inline-block">
+              <button
+                type="button"
+                className="text-gray-400 hover:text-amber-500 relative z-10 pointer-events-none"
+                tabIndex={-1}
+                disabled={isDateLocked}
+                aria-label="用日曆選擇"
+              >
+                <Calendar className="w-5 h-5" />
+              </button>
+              <input
+                type="date"
+                ref={dateInputRef}
+                className="date-picker-dark"
+                style={{
+                  position: "absolute",
+                  right: "-8px",
+                  top: "-8px",
+                  opacity: 0,
+                  width: "40px",
+                  height: "40px",
+                  cursor: isDateLocked ? "not-allowed" : "pointer",
+                  colorScheme: "dark",
+                }}
+                max={new Date().toISOString().split("T")[0]}
+                disabled={isDateLocked}
+                onChange={(e) => {
+                  const [y, m, d] = e.target.value.split("-");
+                  setBirthYear(y);
+                  setBirthMonth(m);
+                  setBirthDay(d);
+                  setYearError("");
+                  setMonthError("");
+                  setDayError("");
+                }}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4 relative">
+            <div className="relative">
+              <input
+                type="number"
+                value={birthYear}
+                onChange={handleYearChange}
+                disabled={isDateLocked}
+                placeholder="YYYY"
+                className={`appearance-none w-full px-4 py-3 bg-gray-700 rounded-lg border ${
+                  yearError ? "border-red-500" : "border-gray-600"
+                } focus:border-amber-500 focus:ring-2 focus:ring-amber-500 outline-none transition-all text-lg ${
+                  isDateLocked ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+              />
+              <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm">
+                年
+              </span>
+              {yearError && (
+                <div className="text-red-500 text-xs mt-1">{yearError}</div>
+              )}
+            </div>
+            <div className="relative">
+              <input
+                type="number"
+                value={birthMonth}
+                onChange={handleMonthChange}
+                disabled={isDateLocked}
+                placeholder="MM"
+                className={`appearance-none w-full px-4 py-3 bg-gray-700 rounded-lg border ${
+                  monthError ? "border-red-500" : "border-gray-600"
+                } focus:border-amber-500 focus:ring-2 focus:ring-amber-500 outline-none transition-all text-lg ${
+                  isDateLocked ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+              />
+              <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm">
+                月
+              </span>
+              {monthError && (
+                <div className="text-red-500 text-xs mt-1">{monthError}</div>
+              )}
+            </div>
+            <div className="relative">
+              <input
+                type="number"
+                value={birthDay}
+                onChange={handleDayChange}
+                disabled={isDateLocked}
+                placeholder="DD"
+                className={`appearance-none w-full px-4 py-3 bg-gray-700 rounded-lg border ${
+                  dayError ? "border-red-500" : "border-gray-600"
+                } focus:border-amber-500 focus:ring-2 focus:ring-amber-500 outline-none transition-all text-lg ${
+                  isDateLocked ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+              />
+              <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm">
+                日
+              </span>
+              {dayError && (
+                <div className="text-red-500 text-xs mt-1">{dayError}</div>
+              )}
             </div>
           </div>
         </div>
-
         <button
           type="submit"
-          disabled={loading}
+          disabled={
+            loading ||
+            !!yearError ||
+            !!monthError ||
+            !!dayError ||
+            !birthYear ||
+            !birthMonth ||
+            !birthDay
+          }
           className="w-full mt-6 px-6 py-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 rounded-lg font-bold text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
         >
           {loading ? (

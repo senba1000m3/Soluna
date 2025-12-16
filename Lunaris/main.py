@@ -177,10 +177,10 @@ class PairCompareRequest(BaseModel):
 
 
 class TimelineRequest(BaseModel):
-    users: List[str]
-    start_year: Optional[int] = None
-    end_year: Optional[int] = None
-    season: Optional[str] = None
+    username: Optional[str] = None
+    birth_year: int
+    birth_month: Optional[int] = None
+    birth_day: Optional[int] = None
 
 
 class UserInfoRequest(BaseModel):
