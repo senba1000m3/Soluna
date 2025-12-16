@@ -64,9 +64,9 @@ export const QuickIDSelector: React.FC<QuickIDSelectorProps> = ({
         {/* 快速選擇下拉選單 */}
         {showDropdown && hasQuickOptions && (
           <div className="absolute z-10 w-full mt-2 bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-2 max-h-80 overflow-y-auto">
-            <div className="px-3 py-2 text-xs text-gray-400 border-b border-gray-700">
+            {/*<div className="px-3 py-2 text-xs text-gray-400 border-b border-gray-700">
               快速選擇
-            </div>
+            </div>*/}
 
             {/* 主 ID（如果存在） */}
             {mainUser && (
