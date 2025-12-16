@@ -46,7 +46,7 @@ if %ERRORLEVEL% EQU 0 (
     echo ✅ 訓練完成！
     echo ================================================================================
     echo.
-    echo 模型檔案位置: bert_models\
+    echo 模型檔案位置: trained_models\
     echo   - best_model.pth      (最佳模型)
     echo   - item_mappings.pkl   (動畫 ID 映射)
     echo.

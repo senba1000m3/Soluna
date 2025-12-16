@@ -12,7 +12,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sqlmodel import Session
 from tqdm import tqdm
 
-from bert_model.bert_recommender_optimized import OptimizedBERTRecommender
 from database import engine
 from recommendation_engine import RecommendationEngine
 
@@ -62,6 +61,10 @@ class HybridRecommendationEngine:
                     )
                     self.use_bert = False
                     return
+
+                from bert_model.bert_recommender_optimized import (
+                    OptimizedBERTRecommender,
+                )
 
                 with Session(engine) as session:
                     self.bert_recommender = OptimizedBERTRecommender(

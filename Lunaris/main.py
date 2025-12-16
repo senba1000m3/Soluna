@@ -13,6 +13,7 @@ from sqlmodel import Session, select
 
 # Import the client we created
 from anilist_client import AniListClient
+from bert_model.bert_recommender_optimized import OptimizedBERTRecommender
 from database import engine, get_session, init_db
 from drop_analysis_engine import DropAnalysisEngine
 from hybrid_drop_prediction_engine import HybridDropPredictionEngine
@@ -909,6 +910,7 @@ async def analyze_drops(
             hybrid_drop_engine = HybridDropPredictionEngine(
                 bert_model_path="bert_model/trained_models/best_model.pth",
                 bert_dataset_path="bert_model/trained_models/item_mappings.pkl",
+                bert_db_path="bert_model/bert.db",
                 bert_weight=0.8,
                 xgboost_weight=0.2,
                 use_bert=True,

@@ -6,6 +6,7 @@
 import hashlib
 import json
 import logging
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,6 +16,9 @@ import torch
 import torch.nn as nn
 from sqlmodel import Session, select
 from tqdm import tqdm
+
+# 添加父目錄到路徑以便導入
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models import BERTRecommendationCache, BERTUserProfile
 

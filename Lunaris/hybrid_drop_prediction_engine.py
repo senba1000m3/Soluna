@@ -38,6 +38,7 @@ class HybridDropPredictionEngine:
         self,
         bert_model_path: str = "bert_model/trained_models/best_model.pth",
         bert_dataset_path: str = "bert_model/trained_models/item_mappings.pkl",
+        bert_db_path: str = "bert_model/bert.db",
         bert_weight: float = 0.8,
         xgboost_weight: float = 0.2,
         use_bert: bool = True,
@@ -49,6 +50,7 @@ class HybridDropPredictionEngine:
         Args:
             bert_model_path: BERT 模型路徑
             bert_dataset_path: BERT 映射資料路徑
+            bert_db_path: BERT 資料庫路徑
             bert_weight: BERT 預測的權重 (預設 0.8)
             xgboost_weight: XGBoost 預測的權重 (預設 0.2)
             use_bert: 是否啟用 BERT (False 時僅使用 XGBoost)
@@ -64,6 +66,10 @@ class HybridDropPredictionEngine:
 
         # 初始化 BERT 推薦器
         self.bert_recommender = None
+        self.bert_model_path = bert_model_path
+        self.bert_dataset_path = bert_dataset_path
+        self.bert_db_path = bert_db_path
+
         if use_bert:
             try:
                 from pathlib import Path
@@ -73,13 +79,16 @@ class HybridDropPredictionEngine:
                         f"BERT model not found at {bert_model_path}, falling back to XGBoost only"
                     )
                     self.use_bert = False
+                elif not Path(bert_db_path).exists():
+                    logger.warning(
+                        f"BERT database not found at {bert_db_path}, falling back to XGBoost only"
+                    )
+                    self.use_bert = False
                 else:
-                    # BERT 推薦器需要 DB session，將在預測時傳入
-                    self.bert_model_path = bert_model_path
-                    self.bert_dataset_path = bert_dataset_path
-                    logger.info("BERT model path validated")
+                    logger.info(f"BERT model path validated: {bert_model_path}")
+                    logger.info(f"BERT database path validated: {bert_db_path}")
             except Exception as e:
-                logger.error(f"Failed to validate BERT model: {e}")
+                logger.error(f"Failed to validate BERT paths: {e}")
                 self.use_bert = False
 
         logger.info(
@@ -124,15 +133,20 @@ class HybridDropPredictionEngine:
 
         if self.bert_recommender is None:
             try:
+                from bert_model.bert_recommender_optimized import (
+                    OptimizedBERTRecommender,
+                )
+
                 self.bert_recommender = OptimizedBERTRecommender(
                     model_path=self.bert_model_path,
                     dataset_path=self.bert_dataset_path,
                     db_session=session,
                     device="auto",
                 )
-                logger.info("BERT recommender initialized successfully")
+                logger.info("✅ BERT recommender initialized successfully")
             except Exception as e:
-                logger.error(f"Failed to initialize BERT recommender: {e}")
+                logger.error(f"❌ Failed to initialize BERT recommender: {e}")
+                logger.exception(e)
                 self.use_bert = False
                 self.bert_recommender = None
 

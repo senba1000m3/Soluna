@@ -25,6 +25,9 @@ from sqlmodel import Session, create_engine, select
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+# 導入資料庫模型
+from prepare_bert_dataset import BERTAnime, BERTUserAnimeList
+
 # Fix Windows encoding issue
 if sys.platform == "win32":
     import codecs
@@ -50,15 +53,13 @@ BERT_DB_PATH = "bert.db"
 BERT_DB_URL = f"sqlite:///{BERT_DB_PATH}"
 
 # 模型輸出目錄
-OUTPUT_DIR = Path("bert_models")
+OUTPUT_DIR = Path("trained_models")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
 # ============================================================================
 # 載入資料庫模型
 # ============================================================================
-
-from prepare_bert_dataset import BERTAnime, BERTUserAnimeList
 
 # ============================================================================
 # BERT4Rec 模型架構

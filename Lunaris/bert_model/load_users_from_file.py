@@ -397,8 +397,8 @@ async def main():
 
         print("\n✅ 完成！")
         print("\n下一步:")
-        print("  1. 檢查資料庫: bert.db")
-        print("  2. 訓練模型: python train_bert_model.py --epochs 20")
+        print("  1. 檢查資料庫: bert_model/bert.db")
+        print("  2. 訓練模型: cd bert_model && python train_bert_model.py --epochs 20")
         sys.exit(0)
 
     except KeyboardInterrupt:
