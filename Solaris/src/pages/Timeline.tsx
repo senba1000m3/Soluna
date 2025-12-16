@@ -2,15 +2,13 @@ import React, { useState, useRef } from "react";
 import {
   Clock,
   Calendar,
-  Baby,
   Loader2,
   Film,
   Star,
   ExternalLink,
-  Trophy,
-  Cake,
 } from "lucide-react";
 import { QuickIDSelector } from "../components/QuickIDSelector";
+import { StatsPanel, BirthYearCard } from "../components/timeline";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
@@ -59,6 +57,18 @@ interface TimelineStats {
     days: number;
     hours: number;
     label: string;
+  };
+  favorite_season?: {
+    season: string;
+    season_en: string;
+    count: number;
+    year: number;
+    label: string;
+  };
+  favorites_count?: {
+    count: number;
+    label: string;
+    description: string;
   };
 }
 
@@ -459,98 +469,16 @@ export const Timeline = () => {
               <div className="grid grid-cols-[1fr_2fr] md:grid-cols-[1fr_2fr] gap-8">
                 {/* Stats */}
                 {result.stats && Object.keys(result.stats).length > 0 && (
-                  <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
-                    <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2 border-b border-gray-700 pb-3">
-                      <Trophy className="w-5 h-5 text-amber-500" />
-                      你的動畫數據
-                    </h3>
-                    <div className="space-y-6">
-                      {result.stats.most_active_year && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400 text-sm">
-                            {result.stats.most_active_year.label}
-                          </span>
-                          <div className="text-right">
-                            <span className="text-2xl font-bold text-white block">
-                              {result.stats.most_active_year.year}
-                            </span>
-                            <span className="text-xs text-amber-500">
-                              看了 {result.stats.most_active_year.count} 部
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                      {result.stats.favorite_genre && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400 text-sm">
-                            {result.stats.favorite_genre.label}
-                          </span>
-                          <div className="text-right">
-                            <span className="text-2xl font-bold text-white block">
-                              {result.stats.favorite_genre.genre}
-                            </span>
-                            <span className="text-xs text-amber-500">
-                              看了 {result.stats.favorite_genre.count} 部
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                      {result.stats.total_watch_time && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400 text-sm">
-                            {result.stats.total_watch_time.label}
-                          </span>
-                          <div className="text-right">
-                            <span className="text-2xl font-bold text-white block">
-                              {result.stats.total_watch_time.days} 天
-                            </span>
-                            <span className="text-xs text-amber-500">
-                              約 {result.stats.total_watch_time.hours} 小時
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <StatsPanel stats={result.stats} />
                 )}
 
                 {/* Birth Year Anime */}
                 {result.birth_year_anime &&
                   result.birth_year_anime.length > 0 && (
-                    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
-                      <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2 border-b border-gray-700 pb-3">
-                        <Star className="w-5 h-5 text-amber-500" />
-                        你出生那年的霸權動畫
-                      </h3>
-                      <div className="grid grid-cols-5 gap-4">
-                        {result.birth_year_anime.slice(0, 10).map((anime) => (
-                          <div
-                            key={anime.id}
-                            className="text-center group cursor-pointer"
-                            onClick={() =>
-                              window.open(
-                                `https://anilist.co/anime/${anime.id}`,
-                                "_blank",
-                              )
-                            }
-                          >
-                            <div className="relative mb-2 overflow-hidden rounded-lg">
-                              <img
-                                src={anime.coverImage.large}
-                                alt={anime.title.romaji}
-                                className="w-full aspect-[3/4] object-cover group-hover:scale-110 transition-transform duration-300"
-                              />
-                            </div>
-                            <p className="text-xs text-white font-medium line-clamp-2">
-                              {anime.title.english || anime.title.romaji}
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              {anime.seasonYear || anime.startDate?.year}年
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <BirthYearCard
+                      birthYear={result.birth_year}
+                      animeList={result.birth_year_anime}
+                    />
                   )}
               </div>
             )}

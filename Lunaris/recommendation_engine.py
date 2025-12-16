@@ -718,4 +718,51 @@ class RecommendationEngine:
             "label": "人生獻祭時間",
         }
 
+        # 4. Favorite Season (今年看最多動畫的季節)
+        from datetime import datetime
+
+        current_year = datetime.now().year
+
+        season_counts = Counter()
+        for entry in completed_list:
+            media = entry.get("media", {})
+            season_year = media.get("seasonYear")
+            season = media.get("season")
+
+            # Only count anime from current year
+            if season_year == current_year and season:
+                season_counts[season] += 1
+
+        if season_counts:
+            fav_season, count = season_counts.most_common(1)[0]
+            # Map season to Chinese
+            season_map = {
+                "WINTER": "冬季",
+                "SPRING": "春季",
+                "SUMMER": "夏季",
+                "FALL": "秋季",
+            }
+            stats["favorite_season"] = {
+                "season": season_map.get(fav_season, fav_season),
+                "season_en": fav_season,
+                "count": count,
+                "year": current_year,
+                "label": "今年追番最多的季節",
+            }
+
+        # 5. Favorites Count (喜歡的作品數) - Count high scored anime (>= 8.0 on 10-point scale)
+        favorites_count = 0
+        for entry in completed_list:
+            score = entry.get("score", 0)
+            # Normalize score: if > 10, it's likely 0-100 scale, divide by 10
+            normalized_score = (score / 10.0) if score > 10 else score
+            if normalized_score >= 8.0:
+                favorites_count += 1
+
+        stats["favorites_count"] = {
+            "count": favorites_count,
+            "label": "喜歡的作品數",
+            "description": "評分 8 分以上的作品",
+        }
+
         return stats
