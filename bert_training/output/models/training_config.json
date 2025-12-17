@@ -1,0 +1,24 @@
+{
+  "training": {
+    "epochs": 200,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "val_ratio": 0.1,
+    "hidden_size": 256,
+    "num_layers": 2,
+    "num_heads": 4,
+    "max_seq_len": 200,
+    "dropout": 0.1
+  },
+  "data": {
+    "num_anime": 3000,
+    "min_user_anime": 20,
+    "mask_prob": 0.15,
+    "top_k_list": [
+      1,
+      5,
+      10,
+      20
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+# BERT4Rec 訓練所需依賴套件
+
+# 深度學習框架
+torch>=2.0.0
+torchvision>=0.15.0
+
+# 資料處理
+numpy>=1.24.0
+pandas>=2.0.0
+
+# 資料庫
+sqlmodel>=0.0.14
+sqlalchemy>=2.0.0
+
+# HTTP 請求
+aiohttp>=3.9.0
+requests>=2.31.0
+
+# 進度條
+tqdm>=4.66.0
+
+# 視覺化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# 其他工具
+python-dotenv>=1.0.0
